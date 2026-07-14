@@ -1,0 +1,276 @@
+// ProofDesk — Verifiable sports trading terminal & agent
+// Backend: match replay engine + rule-based agent + hash-chained proof journal.
+// TxLINE live connector plugs in via env (TXLINE_API_BASE / TXLINE_JWT / TXLINE_API_TOKEN).
+
+import express from "express";
+import { WebSocketServer } from "ws";
+import { createServer } from "http";
+import { createHash, randomUUID } from "crypto";
+import { readFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PORT = process.env.PORT || 8088;
+const DATA_DIR = join(__dirname, "data");
+mkdirSync(DATA_DIR, { recursive: true });
+
+// ---------------------------------------------------------------------------
+// 1. MATCH SIMULATOR / REPLAY ENGINE ("le guetteur")
+//    Deterministic seeded match generator -> same seed = same match = same
+//    agent decisions = verifiable, reproducible demo.
+// ---------------------------------------------------------------------------
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const TEAMS = [
+  ["France", "Brazil"], ["Argentina", "Germany"], ["Spain", "England"],
+  ["Portugal", "Netherlands"], ["Morocco", "Japan"], ["USA", "Mexico"],
+];
+
+// Generates a full 90-min match timeline: odds ticks (every ~30s of match
+// time) + events (goals, cards, VAR, corners, shots).
+export function generateMatch(seed) {
+  const rnd = mulberry32(seed);
+  const [home, away] = TEAMS[seed % TEAMS.length];
+  const strength = 0.35 + rnd() * 0.3; // home win base probability
+  let pHome = strength, pDraw = 0.28, pAway = 1 - strength - 0.28;
+  let scoreH = 0, scoreA = 0;
+  const timeline = [];
+
+  const pushOdds = (min) => {
+    const norm = pHome + pDraw + pAway;
+    const margin = 1.06; // bookmaker overround
+    timeline.push({
+      type: "odds", minute: min,
+      home: +(norm / (pHome * margin)).toFixed(2),
+      draw: +(norm / (pDraw * margin)).toFixed(2),
+      away: +(norm / (pAway * margin)).toFixed(2),
+    });
+  };
+
+  pushOdds(0);
+  for (let min = 1; min <= 90; min++) {
+    // random drift
+    const drift = (rnd() - 0.5) * 0.012;
+    pHome = Math.max(0.03, pHome + drift);
+    pAway = Math.max(0.03, pAway - drift * 0.6);
+
+    const r = rnd();
+    if (r < 0.028) { // goal ~2.5 per match
+      const isHome = rnd() < pHome / (pHome + pAway);
+      if (isHome) { scoreH++; pHome = Math.min(0.92, pHome + 0.18); pAway = Math.max(0.02, pAway - 0.12); }
+      else { scoreA++; pAway = Math.min(0.92, pAway + 0.18); pHome = Math.max(0.02, pHome - 0.12); }
+      pDraw = Math.max(0.04, 1 - pHome - pAway);
+      timeline.push({ type: "goal", minute: min, team: isHome ? home : away, score: `${scoreH}-${scoreA}` });
+      // VAR check on some goals
+      if (rnd() < 0.18) {
+        timeline.push({ type: "var", minute: min, review: "Goal" });
+        if (rnd() < 0.35) { // overturned!
+          if (isHome) { scoreH--; pHome = Math.max(0.05, pHome - 0.15); } else { scoreA--; pAway = Math.max(0.05, pAway - 0.15); }
+          timeline.push({ type: "var_end", minute: min, outcome: "Overturned", score: `${scoreH}-${scoreA}` });
+        } else {
+          timeline.push({ type: "var_end", minute: min, outcome: "Stands" });
+        }
+      }
+    } else if (r < 0.05) {
+      timeline.push({ type: "shot", minute: min, team: rnd() < 0.5 ? home : away, outcome: rnd() < 0.4 ? "OnTarget" : "OffTarget" });
+    } else if (r < 0.07) {
+      timeline.push({ type: "corner", minute: min, team: rnd() < 0.5 ? home : away });
+    } else if (r < 0.082) {
+      const red = rnd() < 0.12;
+      const isHome = rnd() < 0.5;
+      timeline.push({ type: "card", minute: min, card: red ? "red" : "yellow", team: isHome ? home : away });
+      if (red) { if (isHome) { pHome = Math.max(0.03, pHome - 0.14); pAway += 0.1; } else { pAway = Math.max(0.03, pAway - 0.14); pHome += 0.1; } }
+    }
+    if (min % 1 === 0) pushOdds(min);
+  }
+  timeline.push({ type: "full_time", minute: 90, score: `${scoreH}-${scoreA}`, winner: scoreH > scoreA ? home : scoreA > scoreH ? away : "draw" });
+  return { seed, home, away, timeline };
+}
+
+// ---------------------------------------------------------------------------
+// 2. PROOF JOURNAL ("le notaire") — hash-chained, append-only decision log.
+//    Each record embeds sha256(prev) -> tamper-evident chain.
+//    anchorTx: reserved for Solana devnet anchoring (wired at J3).
+// ---------------------------------------------------------------------------
+
+const JOURNAL_FILE = join(DATA_DIR, "journal.jsonl");
+let lastHash = "GENESIS";
+if (existsSync(JOURNAL_FILE)) {
+  const lines = readFileSync(JOURNAL_FILE, "utf8").trim().split("\n").filter(Boolean);
+  if (lines.length) lastHash = JSON.parse(lines[lines.length - 1]).hash;
+}
+
+function journalAppend(record) {
+  const body = { ...record, id: randomUUID(), ts: new Date().toISOString(), prevHash: lastHash };
+  const hash = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+  const entry = { ...body, hash, anchorTx: null };
+  appendFileSync(JOURNAL_FILE, JSON.stringify(entry) + "\n");
+  lastHash = hash;
+  broadcast({ kind: "journal", entry });
+  return entry;
+}
+
+function journalRead(limit = 200) {
+  if (!existsSync(JOURNAL_FILE)) return [];
+  const lines = readFileSync(JOURNAL_FILE, "utf8").trim().split("\n").filter(Boolean);
+  return lines.slice(-limit).map((l) => JSON.parse(l));
+}
+
+function journalVerify() {
+  const entries = journalRead(1e9);
+  let prev = "GENESIS";
+  for (const e of entries) {
+    const { hash, anchorTx, ...body } = e;
+    if (body.prevHash !== prev) return { ok: false, brokenAt: e.id, reason: "prevHash mismatch" };
+    const recomputed = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+    if (recomputed !== hash) return { ok: false, brokenAt: e.id, reason: "hash mismatch" };
+    prev = hash;
+  }
+  return { ok: true, count: entries.length, head: prev };
+}
+
+// ---------------------------------------------------------------------------
+// 3. RULE-BASED AGENT ("le trader") — paper-trading book.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_RULES = [
+  { id: "momentum-drop", desc: "Back a team if its odds shorten >12% within 5 min (market momentum)", threshold: 0.12, window: 5, stake: 50 },
+  { id: "red-card-fade", desc: "Lay (bet against) a team that receives a red card", stake: 40 },
+  { id: "late-equalizer-hunt", desc: "Back the draw if a team leads by 1 goal after minute 75 and concedes >2 corners in 5 min", stake: 30 },
+];
+
+function makeAgentState() {
+  return { bankroll: 1000, openPositions: [], closedPositions: [], oddsHistory: [], rules: JSON.parse(JSON.stringify(DEFAULT_RULES)) };
+}
+
+function agentOnTick(session, ev) {
+  const st = session.agent;
+  const m = session.match;
+  const decisions = [];
+
+  if (ev.type === "odds") {
+    st.oddsHistory.push(ev);
+    const windowStart = ev.minute - st.rules[0].window;
+    const past = st.oddsHistory.find((o) => o.minute >= windowStart);
+    if (past) {
+      for (const side of ["home", "away"]) {
+        const drop = (past[side] - ev[side]) / past[side];
+        if (drop > st.rules[0].threshold && !st.openPositions.some((p) => p.side === side)) {
+          decisions.push(openPosition(session, { rule: "momentum-drop", side, team: side === "home" ? m.home : m.away, odds: ev[side], stake: st.rules[0].stake, minute: ev.minute, trigger: `${side} odds shortened ${(drop * 100).toFixed(1)}% over ${st.rules[0].window}min (${past[side]} → ${ev[side]})` }));
+        }
+      }
+    }
+  }
+
+  if (ev.type === "card" && ev.card === "red") {
+    const side = ev.team === m.home ? "away" : "home"; // bet against carded team
+    const lastOdds = st.oddsHistory[st.oddsHistory.length - 1];
+    if (lastOdds && !st.openPositions.some((p) => p.rule === "red-card-fade")) {
+      decisions.push(openPosition(session, { rule: "red-card-fade", side, team: side === "home" ? m.home : m.away, odds: lastOdds[side], stake: st.rules[1].stake, minute: ev.minute, trigger: `Red card for ${ev.team} at ${ev.minute}'` }));
+    }
+  }
+
+  if (ev.type === "full_time") settleAll(session, ev);
+  return decisions;
+}
+
+function openPosition(session, pos) {
+  const st = session.agent;
+  st.bankroll -= pos.stake;
+  const position = { ...pos, id: randomUUID().slice(0, 8), status: "open" };
+  st.openPositions.push(position);
+  // Every decision is notarised with the triggering data snapshot.
+  const proof = journalAppend({
+    kind: "decision", action: "OPEN", position,
+    dataSnapshot: { seed: session.match.seed, match: `${session.match.home} vs ${session.match.away}`, trigger: pos.trigger },
+  });
+  return { position, proof };
+}
+
+function settleAll(session, ftEv) {
+  const st = session.agent;
+  for (const p of st.openPositions) {
+    const won = (ftEv.winner === p.team) || (p.side === "draw" && ftEv.winner === "draw");
+    const pnl = won ? +(p.stake * (p.odds - 1)).toFixed(2) : -p.stake;
+    if (won) st.bankroll += p.stake * p.odds;
+    const closed = { ...p, status: "settled", won, pnl, finalScore: ftEv.score };
+    st.closedPositions.push(closed);
+    journalAppend({ kind: "decision", action: "SETTLE", position: closed, dataSnapshot: { finalScore: ftEv.score, winner: ftEv.winner } });
+  }
+  st.openPositions = [];
+}
+
+// ---------------------------------------------------------------------------
+// 4. SESSION / REPLAY LOOP
+// ---------------------------------------------------------------------------
+
+const sessions = new Map();
+
+function startReplay(seed = 42, speed = 20) {
+  stopReplay();
+  const match = generateMatch(seed);
+  const session = { id: randomUUID().slice(0, 8), match, agent: makeAgentState(), cursor: 0, speed, timer: null };
+  sessions.set("current", session);
+  journalAppend({ kind: "session_start", match: `${match.home} vs ${match.away}`, seed, speed });
+  broadcast({ kind: "session", match: { home: match.home, away: match.away, seed }, agent: session.agent });
+
+  const tick = () => {
+    const s = sessions.get("current");
+    if (!s || s.cursor >= s.match.timeline.length) return stopReplay();
+    const ev = s.match.timeline[s.cursor++];
+    broadcast({ kind: "event", ev });
+    const decisions = agentOnTick(s, ev);
+    for (const d of decisions) broadcast({ kind: "decision", ...d });
+    broadcast({ kind: "agent", agent: { bankroll: s.agent.bankroll, open: s.agent.openPositions, closed: s.agent.closedPositions } });
+    if (ev.type === "full_time") { broadcast({ kind: "session_end" }); return stopReplay(); }
+    s.timer = setTimeout(tick, 1000 / s.speed * (s.match.timeline[s.cursor]?.minute > ev.minute ? 30 : 3));
+  };
+  tick();
+  return session;
+}
+
+function stopReplay() {
+  const s = sessions.get("current");
+  if (s?.timer) clearTimeout(s.timer);
+  sessions.delete("current");
+}
+
+// ---------------------------------------------------------------------------
+// 5. HTTP + WS
+// ---------------------------------------------------------------------------
+
+const app = express();
+app.use(express.json());
+app.use(express.static(join(__dirname, "public")));
+
+app.post("/api/replay/start", (req, res) => {
+  const { seed = 42, speed = 20 } = req.body || {};
+  const s = startReplay(Number(seed), Number(speed));
+  res.json({ ok: true, session: s.id, match: `${s.match.home} vs ${s.match.away}` });
+});
+app.post("/api/replay/stop", (_req, res) => { stopReplay(); res.json({ ok: true }); });
+app.get("/api/journal", (_req, res) => res.json(journalRead()));
+app.get("/api/journal/verify", (_req, res) => res.json(journalVerify()));
+app.get("/api/health", (_req, res) => res.json({ ok: true, service: "proofdesk", uptime: process.uptime() }));
+
+const server = createServer(app);
+const wss = new WebSocketServer({ server, path: "/ws" });
+function broadcast(msg) {
+  const s = JSON.stringify(msg);
+  for (const c of wss.clients) if (c.readyState === 1) c.send(s);
+}
+wss.on("connection", (ws) => {
+  ws.send(JSON.stringify({ kind: "hello", journal: journalRead(50) }));
+});
+
+server.listen(PORT, () => console.log(`ProofDesk listening on :${PORT}`));

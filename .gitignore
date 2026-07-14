@@ -1,0 +1,7 @@
+# secrets & runtime data — NEVER commit
+data/
+*.credentials.json
+wallet.json
+.env
+node_modules/
+npm-debug.log
