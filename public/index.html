@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ProofDesk — Verifiable Sports Trading</title>
+<title>ProofDesk — Live Football</title>
 <style>
-  /* SofaScore-inspired: dark navy surfaces, red = live, data-first hierarchy */
+  /* SofaScore UX principles: live-first, list is king, red = live, data-first */
   :root {
     --bg: #0e1319; --card: #161d26; --card2: #1c242f; --line: #242e3b;
     --text: #eef2f6; --dim: #8a95a3; --dimmer: #566171;
@@ -16,325 +16,264 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; min-height: 100vh; }
 
-  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px; padding: 12px 20px; background: rgba(14,19,25,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 18px; padding: 12px 20px; background: rgba(14,19,25,.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
   .logo { font-weight: 800; font-size: 17px; letter-spacing: .5px; }
   .logo span { color: var(--live); }
+  nav { display: flex; gap: 4px; }
+  nav .sport { padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--dim); cursor: pointer; }
+  nav .sport.on { color: #fff; background: var(--card2); }
   .conn { margin-left: auto; display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 12px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dimmer); }
   .dot.live { background: var(--live); box-shadow: 0 0 10px var(--live); animation: pulse 1.4s infinite; }
   @keyframes pulse { 50% { opacity: .35; } }
 
-  .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: 320px minmax(0,1fr) 330px; gap: 14px; align-items: start; }
-  @media (max-width: 1080px) { .wrap { grid-template-columns: 1fr; } }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 14px; display: grid; grid-template-columns: 360px minmax(0,1fr); gap: 14px; align-items: start; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
 
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  .card + .card { margin-top: 14px; }
-  .card h3 { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.1px; color: var(--dim); padding: 12px 14px 9px; }
 
-  /* ===== LEFT: match list (SofaScore-style rows) ===== */
+  /* ===== LEFT: match list ===== */
   .lfilters { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-  .chip { padding: 5px 12px; border-radius: 16px; font-size: 12px; font-weight: 600; color: var(--dim); background: var(--card2); cursor: pointer; border: 1px solid transparent; }
-  .chip.on { color: #fff; background: rgba(255,74,74,.15); border-color: rgba(255,74,74,.4); }
-  .leaguehdr { display: flex; gap: 8px; align-items: center; padding: 9px 14px 6px; color: var(--dimmer); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
-  .mrow { display: grid; grid-template-columns: 42px 1fr auto; gap: 10px; padding: 8px 14px; cursor: pointer; align-items: center; border-top: 1px solid #1a212b; }
+  .chip { padding: 5px 14px; border-radius: 16px; font-size: 12.5px; font-weight: 600; color: var(--dim); background: var(--card2); cursor: pointer; border: 1px solid transparent; }
+  .chip.on { color: #fff; background: rgba(255,74,74,.14); border-color: rgba(255,74,74,.45); }
+  .chip .n { font-size: 11px; opacity: .8; }
+  .leaguehdr { display: flex; gap: 8px; align-items: center; padding: 10px 14px 7px; color: var(--dimmer); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; }
+  .mrow { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; padding: 9px 14px; cursor: pointer; align-items: center; border-top: 1px solid #1a212b; }
   .mrow:hover { background: var(--card2); }
-  .mrow.sel { background: rgba(79,156,247,.08); border-left: 3px solid var(--blue); padding-left: 11px; }
-  .mrow .st { font-size: 11.5px; color: var(--dimmer); text-align: center; font-weight: 600; }
+  .mrow.sel { background: rgba(79,156,247,.08); box-shadow: inset 3px 0 0 var(--blue); }
+  .mrow .st { font-size: 11.5px; color: var(--dimmer); text-align: center; font-weight: 700; line-height: 1.3; }
   .mrow .st.live { color: var(--live); }
-  .mrow .tms { display: flex; flex-direction: column; gap: 3px; font-size: 13px; font-weight: 500; }
-  .mrow .oddsmini { display: flex; gap: 4px; }
-  .omini { background: var(--card2); border-radius: 5px; padding: 3px 6px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--dim); min-width: 36px; text-align: center; }
-  .empty { padding: 16px 14px; color: var(--dimmer); font-size: 13px; }
+  .mrow .tms { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; font-weight: 500; min-width: 0; }
+  .mrow .tms span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mrow .scs { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+  .mrow .scs.live { color: var(--live); }
+  .empty { padding: 18px 14px; color: var(--dimmer); font-size: 13px; }
 
-  /* ===== CENTER: match hero ===== */
-  .hero { padding: 16px 16px 12px; text-align: center; }
-  .hero .comp { color: var(--dimmer); font-size: 12px; margin-bottom: 12px; display: flex; justify-content: center; gap: 8px; align-items: center; }
-  .badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; background: var(--card2); color: var(--dim); }
-  .badge.live { background: rgba(255,74,74,.13); color: var(--live); animation: pulse 1.4s infinite; }
+  /* ===== RIGHT: match detail ===== */
+  .crumb { color: var(--dimmer); font-size: 12px; padding: 14px 16px 0; }
+  .hero { padding: 12px 16px 14px; text-align: center; }
   .teams { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
   .team { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-  .avatar { width: 50px; height: 50px; border-radius: 50%; background: var(--card2); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 17px; color: var(--dim); }
-  .team .name { font-weight: 600; font-size: 13.5px; }
-  .score { font-size: 40px; font-weight: 800; letter-spacing: 2px; padding: 0 12px; font-variant-numeric: tabular-nums; }
-  .minute { color: var(--live); font-size: 13px; font-weight: 700; margin-top: 5px; }
+  .avatar { width: 54px; height: 54px; border-radius: 50%; background: var(--card2); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 17px; color: var(--dim); }
+  .team .name { font-weight: 600; font-size: 14px; }
+  .score { font-size: 44px; font-weight: 800; letter-spacing: 2px; padding: 0 14px; font-variant-numeric: tabular-nums; }
+  .phase { color: var(--live); font-size: 13px; font-weight: 700; margin-top: 6px; }
+  .phase.done { color: var(--dimmer); }
 
-  .oddsRow { display: flex; gap: 8px; padding: 12px 16px 14px; }
+  .oddsRow { display: flex; gap: 8px; padding: 4px 16px 14px; }
   .pill { flex: 1; background: var(--card2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 6px; text-align: center; transition: .25s; }
   .pill .lbl { font-size: 11px; color: var(--dimmer); }
   .pill .v { font-size: 16px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
   .pill.down .v { color: var(--green); } .pill.up .v { color: var(--red); }
   .pill.flash { border-color: var(--blue); }
 
-  /* tabs — SofaScore order: Details | Statistics | Odds */
   .tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 6px; }
-  .tab { padding: 12px 15px; font-size: 13px; font-weight: 600; color: var(--dim); cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab { padding: 12px 16px; font-size: 13px; font-weight: 600; color: var(--dim); cursor: pointer; border-bottom: 2px solid transparent; }
   .tab.on { color: var(--text); border-bottom-color: var(--live); }
-  .tabBody { padding: 12px 16px; min-height: 300px; max-height: 440px; overflow-y: auto; }
+  .tabBody { padding: 12px 16px; min-height: 280px; max-height: 430px; overflow-y: auto; }
 
-  /* incidents timeline */
   .tl { display: flex; gap: 12px; padding: 8px 4px; border-bottom: 1px solid #1a212b; align-items: baseline; }
-  .tl .m { min-width: 34px; color: var(--live); font-family: var(--mono); font-size: 12px; font-weight: 700; }
+  .tl .m { min-width: 36px; color: var(--live); font-family: var(--mono); font-size: 12px; font-weight: 700; }
   .tl .ico { min-width: 20px; }
   .tl.goal { background: rgba(47,189,133,.05); } .tl.goal .t { color: var(--green); font-weight: 700; }
-  .tl.red .t { color: var(--red); font-weight: 700; }
-  .tl.var .t { color: var(--amber); }
   .tl .t { color: var(--dim); }
 
-  /* stats — single split bar, numbers flanking centered label */
   .stat { margin-bottom: 15px; }
-  .stat .row { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; margin-bottom: 5px; }
+  .stat .row { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; margin-bottom: 5px; }
   .stat .row b { font-size: 14px; font-variant-numeric: tabular-nums; }
   .stat .row b:last-child { text-align: right; }
   .stat .cap { text-align: center; color: var(--dim); font-size: 12.5px; }
-  .sbar { display: flex; height: 5px; border-radius: 4px; overflow: hidden; background: var(--card2); }
-  .sbar .h { background: var(--blue); } .sbar .a { background: var(--live); margin-left: auto; }
   .sbar-wrap { display: flex; gap: 3px; }
   .sbar-wrap .half { flex: 1; background: var(--card2); border-radius: 4px; height: 5px; position: relative; overflow: hidden; }
   .sbar-wrap .half i { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
   .sbar-wrap .half.hl i { right: 0; background: var(--blue); }
   .sbar-wrap .half.hr i { left: 0; background: var(--live); }
 
-  canvas { width: 100%; height: 300px; }
-
-  /* right sidebar */
-  .pos { padding: 10px 12px; border-bottom: 1px solid #1a212b; }
-  .pos .row1 { display: flex; justify-content: space-between; font-weight: 600; font-size: 13px; }
-  .pos small { color: var(--dimmer); font-size: 11.5px; display: block; margin-top: 3px; }
-  .pnl.win { color: var(--green); } .pnl.loss { color: var(--red); } .pnl.open { color: var(--amber); }
-  .bank { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-  .bank .v { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
-
-  .jentry { padding: 9px 12px; border-bottom: 1px solid #1a212b; font-size: 12px; }
-  .jentry .hash { color: var(--blue); font-family: var(--mono); font-size: 11px; word-break: break-all; }
-  .jentry small { color: var(--dimmer); }
-  .scrollbox { max-height: 280px; overflow-y: auto; }
-
-  .ctrl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 14px; }
-  button { background: var(--card2); color: var(--text); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; font-family: var(--font); font-weight: 600; cursor: pointer; font-size: 13px; }
-  button:hover { border-color: var(--dim); }
-  button.primary { background: var(--live); border-color: var(--live); color: #fff; }
-  select, input { background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-family: var(--font); font-size: 13px; }
-  .vstate { color: var(--dim); font-size: 12px; width: 100%; }
+  canvas { width: 100%; height: 280px; }
 </style>
 </head>
 <body>
 <header>
   <div class="logo">Proof<span>Desk</span></div>
+  <nav><span class="sport on">⚽ Football</span></nav>
   <div class="conn"><span class="dot" id="connDot"></span><span id="connTxt">connecting…</span></div>
 </header>
 
 <div class="wrap">
-  <!-- LEFT: matches list -->
-  <aside>
-    <div class="card">
-      <div class="lfilters">
-        <span class="chip on" id="fAll">All</span>
-        <span class="chip" id="fLive">Live</span>
-      </div>
-      <div class="leaguehdr">⚽ FIFA World Cup 2026 · TxLINE feed</div>
-      <div id="matchList"><div class="empty">Loading live fixtures…</div></div>
-      <div class="leaguehdr">⏪ Replay (recorded / simulated)</div>
-      <div class="mrow" id="replayRow">
-        <span class="st">SIM</span>
-        <span class="tms"><span>Seeded match</span><span style="color:var(--dimmer)">deterministic replay</span></span>
-        <span class="oddsmini"><span class="omini">▶</span></span>
-      </div>
+  <!-- LEFT: live match list (the king screen) -->
+  <aside class="card">
+    <div class="lfilters">
+      <span class="chip on" id="fAll">All</span>
+      <span class="chip" id="fLive">Live <span class="n" id="liveCount"></span></span>
     </div>
-    <div class="card">
-      <div class="ctrl">
-        <label>Seed <input id="seed" type="number" value="42" style="width:60px"></label>
-        <label>Speed <select id="speed"><option value="10">×10</option><option value="20" selected>×20</option><option value="60">×60</option></select></label>
-        <button class="ghost" id="btnVerify">Verify chain</button>
-        <div class="vstate" id="verifyState"></div>
-      </div>
-    </div>
+    <div class="leaguehdr">🏆 FIFA World Cup 2026</div>
+    <div id="matchList"><div class="empty">Loading live fixtures…</div></div>
   </aside>
 
-  <!-- CENTER: match detail -->
-  <main>
-    <div class="card">
-      <div class="hero">
-        <div class="comp"><span id="compName">FIFA World Cup 2026</span><span class="badge" id="phase">no session</span></div>
-        <div class="teams">
-          <div class="team"><div class="avatar" id="avHome">–</div><div class="name" id="nmHome">Home</div></div>
-          <div>
-            <div class="score"><span id="scH">0</span> – <span id="scA">0</span></div>
-            <div class="minute" id="minute"></div>
-          </div>
-          <div class="team"><div class="avatar" id="avAway">–</div><div class="name" id="nmAway">Away</div></div>
+  <!-- RIGHT: match detail -->
+  <main class="card">
+    <div class="crumb" id="crumb">FIFA World Cup 2026</div>
+    <div class="hero">
+      <div class="teams">
+        <div class="team"><div class="avatar" id="avHome">–</div><div class="name" id="nmHome">—</div></div>
+        <div>
+          <div class="score"><span id="scH">0</span> – <span id="scA">0</span></div>
+          <div class="phase" id="phase">select a match</div>
         </div>
+        <div class="team"><div class="avatar" id="avAway">–</div><div class="name" id="nmAway">—</div></div>
       </div>
-      <div class="oddsRow">
-        <div class="pill" id="p1"><div class="lbl">1</div><div class="v" id="o1">–</div></div>
-        <div class="pill" id="pX"><div class="lbl">X</div><div class="v" id="oX">–</div></div>
-        <div class="pill" id="p2"><div class="lbl">2</div><div class="v" id="o2">–</div></div>
-      </div>
-      <div class="tabs">
-        <div class="tab on" data-t="details">Details</div>
-        <div class="tab" data-t="stats">Statistics</div>
-        <div class="tab" data-t="odds">Odds</div>
-      </div>
-      <div class="tabBody" id="tb-details"></div>
-      <div class="tabBody" id="tb-stats" style="display:none"><div id="statsBox"></div></div>
-      <div class="tabBody" id="tb-odds" style="display:none"><canvas id="chart"></canvas></div>
     </div>
+    <div class="oddsRow">
+      <div class="pill" id="p1"><div class="lbl">1</div><div class="v" id="o1">–</div></div>
+      <div class="pill" id="pX"><div class="lbl">X</div><div class="v" id="oX">–</div></div>
+      <div class="pill" id="p2"><div class="lbl">2</div><div class="v" id="o2">–</div></div>
+    </div>
+    <div class="tabs">
+      <div class="tab on" data-t="details">Details</div>
+      <div class="tab" data-t="stats">Statistics</div>
+      <div class="tab" data-t="odds">Odds</div>
+    </div>
+    <div class="tabBody" id="tb-details"><div class="empty">Live incidents will appear here.</div></div>
+    <div class="tabBody" id="tb-stats" style="display:none"><div id="statsBox"></div></div>
+    <div class="tabBody" id="tb-odds" style="display:none"><canvas id="chart"></canvas></div>
   </main>
-
-  <!-- RIGHT: agent + proofs -->
-  <aside>
-    <div class="card">
-      <div class="bank"><span style="color:var(--dim);font-size:11.5px;font-weight:700;letter-spacing:1px">AGENT BANKROLL</span><span class="v" id="bankroll">$1000.00</span></div>
-      <h3>Positions</h3>
-      <div class="scrollbox" id="positions"><div class="empty">No positions yet — the agent is watching.</div></div>
-    </div>
-    <div class="card">
-      <h3>🧾 Proof journal — hash-chained</h3>
-      <div class="scrollbox" id="journal"></div>
-    </div>
-  </aside>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let ws, oddsSeries = [], homeName = "Home", awayName = "Away";
-let fixturesCache = [], selectedFixture = null, filterLive = false;
+let ws, oddsSeries = [], eventsCache = [], selectedId = null, filterLive = false;
 
-function initials(n) { return String(n).split(/[\s#]+/).filter(Boolean).map(w => w[0]).join("").slice(0, 3).toUpperCase(); }
+const initials = (n) => String(n).split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
 
+/* ===== WebSocket: real-time detail updates ===== */
 function connect() {
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-  ws.onopen = () => { $("connDot").className = "dot live"; $("connTxt").textContent = "connected"; };
+  ws.onopen = () => { $("connDot").className = "dot live"; $("connTxt").textContent = "live"; };
   ws.onclose = () => { $("connDot").className = "dot"; $("connTxt").textContent = "offline"; setTimeout(connect, 2000); };
   ws.onmessage = (m) => handle(JSON.parse(m.data));
 }
 connect();
 
 function handle(msg) {
-  if (msg.kind === "hello") (msg.journal || []).slice(-12).forEach(renderJournal);
   if (msg.kind === "session") {
-    homeName = msg.match.home; awayName = msg.match.away;
-    $("nmHome").textContent = homeName; $("nmAway").textContent = awayName;
-    $("avHome").textContent = initials(homeName); $("avAway").textContent = initials(awayName);
-    $("scH").textContent = 0; $("scA").textContent = 0;
-    const isLive = msg.match.seed === "LIVE";
-    $("phase").textContent = isLive ? "LIVE" : "REPLAY";
-    $("phase").className = "badge live";
-    $("compName").textContent = isLive ? "FIFA World Cup 2026 · TxLINE live feed" : "FIFA World Cup 2026 · deterministic replay";
-    $("tb-details").innerHTML = ""; $("positions").innerHTML = ""; oddsSeries = [];
-    renderStats({ score: [0,0], corners: [0,0], yellow: [0,0], red: [0,0], shots: [0,0] });
+    $("nmHome").textContent = msg.match.home; $("nmAway").textContent = msg.match.away;
+    $("avHome").textContent = initials(msg.match.home); $("avAway").textContent = initials(msg.match.away);
+    $("tb-details").innerHTML = ""; oddsSeries = [];
   }
   if (msg.kind === "event") renderEvent(msg.ev);
   if (msg.kind === "match_state") renderState(msg.state);
-  if (msg.kind === "journal") renderJournal(msg.entry);
-  if (msg.kind === "agent") renderAgent(msg.agent);
-  if (msg.kind === "live_status") $("connTxt").textContent = "TxLINE " + msg.state;
-  if (msg.kind === "live_odds_all") updateFixtureRow(msg);
-  if (msg.kind === "session_end") { $("phase").textContent = "FULL TIME"; $("phase").className = "badge"; }
+  if (msg.kind === "live_odds_all") refreshList(); /* keep list fresh on odds moves */
 }
 
-/* ===== left match list ===== */
-function renderMatchList() {
-  const list = filterLive ? fixturesCache.filter((f) => f.inRunning) : fixturesCache;
+/* ===== the list (SofaScore's king screen) ===== */
+let listTimer = null;
+async function refreshList() {
+  let body;
+  try { body = await (await fetch("/api/events/live")).json(); } catch { return; }
+  eventsCache = body.events || [];
+  const liveN = eventsCache.filter((e) => e.status.type === "inprogress").length;
+  $("liveCount").textContent = liveN ? "(" + liveN + ")" : "";
+  renderList();
+  if (selectedId == null && eventsCache.length) {
+    const best = eventsCache.find((e) => e.status.type === "inprogress") || eventsCache[0];
+    selectMatch(best.id);
+  }
+}
+
+function renderList() {
+  const list = filterLive ? eventsCache.filter((e) => e.status.type === "inprogress") : eventsCache;
   const el = $("matchList");
-  if (!list.length) { el.innerHTML = '<div class="empty">' + (fixturesCache.length ? "No live match right now." : "Waiting for TxLINE fixtures…") + "</div>"; return; }
-  el.innerHTML = list.map((f) => {
-    const sel = f.fixtureId === selectedFixture ? " sel" : "";
-    const st = f.inRunning ? '<span class="st live">LIVE</span>' : '<span class="st">—</span>';
-    const o = f.odds ? '<span class="oddsmini"><span class="omini">' + f.odds.home.toFixed(2) + '</span><span class="omini">' + f.odds.draw.toFixed(2) + '</span><span class="omini">' + f.odds.away.toFixed(2) + "</span></span>" : "";
-    return '<div class="mrow' + sel + '" data-fx="' + f.fixtureId + '">' + st +
-      '<span class="tms"><span>Home #' + f.fixtureId + '</span><span style="color:var(--dimmer)">Away #' + f.fixtureId + "</span></span>" + o + "</div>";
+  if (!list.length) { el.innerHTML = '<div class="empty">' + (eventsCache.length ? "No live match right now." : "Waiting for TxLINE fixtures…") + "</div>"; return; }
+  el.innerHTML = list.map((e) => {
+    const live = e.status.type === "inprogress";
+    const sel = e.id === selectedId ? " sel" : "";
+    const st = live ? '<span class="st live">' + (e.time.minute != null ? e.time.minute + "′" : "LIVE") + "</span>"
+      : '<span class="st">' + (e.startTimestamp ? new Date(e.startTimestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—") + "</span>";
+    return '<div class="mrow' + sel + '" data-id="' + e.id + '">' + st +
+      '<span class="tms"><span>' + e.homeTeam.name + "</span><span>" + e.awayTeam.name + "</span></span>" +
+      '<span class="scs' + (live ? " live" : "") + '"><span>' + e.homeScore.display + "</span><span>" + e.awayScore.display + "</span></span></div>";
   }).join("");
-  el.querySelectorAll(".mrow").forEach((r) => r.onclick = () => watchFixture(+r.dataset.fx));
+  el.querySelectorAll(".mrow").forEach((r) => r.onclick = () => selectMatch(+r.dataset.id));
 }
 
-function updateFixtureRow(msg) {
-  const f = fixturesCache.find((x) => x.fixtureId === msg.fixtureId);
-  if (f) { f.odds = msg.odds; f.inRunning = msg.inRunning; }
-  else fixturesCache.push({ fixtureId: msg.fixtureId, odds: msg.odds, inRunning: msg.inRunning });
-  renderMatchList();
+async function selectMatch(id) {
+  selectedId = id;
+  renderList();
+  const e = eventsCache.find((x) => x.id === id);
+  if (e) {
+    $("crumb").textContent = e.tournament.name;
+    $("nmHome").textContent = e.homeTeam.name; $("nmAway").textContent = e.awayTeam.name;
+    $("avHome").textContent = initials(e.homeTeam.name); $("avAway").textContent = initials(e.awayTeam.name);
+    $("scH").textContent = e.homeScore.display; $("scA").textContent = e.awayScore.display;
+    setPhase(e);
+    if (e.odds) { $("o1").textContent = e.odds.home.toFixed(2); $("oX").textContent = e.odds.draw.toFixed(2); $("o2").textContent = e.odds.away.toFixed(2); }
+  }
+  await fetch("/api/live/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fixtureId: id }) });
 }
 
-async function watchFixture(fixtureId) {
-  selectedFixture = fixtureId;
-  await fetch("/api/live/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fixtureId }) });
-  renderMatchList();
+function setPhase(e) {
+  const ph = $("phase");
+  if (e.status.type === "inprogress") {
+    ph.className = "phase";
+    ph.textContent = (e.status.description || "Live") + (e.time.minute != null ? " · " + e.time.minute + "′" : "");
+  } else { ph.className = "phase done"; ph.textContent = e.status.description || "—"; }
 }
 
-$("fAll").onclick = () => { filterLive = false; $("fAll").classList.add("on"); $("fLive").classList.remove("on"); renderMatchList(); };
-$("fLive").onclick = () => { filterLive = true; $("fLive").classList.add("on"); $("fAll").classList.remove("on"); renderMatchList(); };
-$("replayRow").onclick = () => fetch("/api/replay/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seed: +$("seed").value, speed: +$("speed").value }) });
+$("fAll").onclick = () => { filterLive = false; $("fAll").classList.add("on"); $("fLive").classList.remove("on"); renderList(); };
+$("fLive").onclick = () => { filterLive = true; $("fLive").classList.add("on"); $("fAll").classList.remove("on"); renderList(); };
 
-/* ===== center ===== */
+/* ===== detail rendering ===== */
 function renderState(st) {
   $("scH").textContent = st.score[0]; $("scA").textContent = st.score[1];
-  if (st.minute) $("minute").textContent = st.minute + "′";
-  if (st.gameState && st.gameState !== "—") $("phase").textContent = st.gameState;
+  if (st.minute != null) $("phase").textContent = (st.gameState && st.gameState !== "—" ? st.gameState + " · " : "") + st.minute + "′";
   renderStats(st);
 }
 
 function renderStats(st) {
   const rows = [
-    ["Shots", st.shots || [0, 0]],
     ["Corners", st.corners || [0, 0]],
     ["Yellow cards", st.yellow || [0, 0]],
     ["Red cards", st.red || [0, 0]],
   ];
+  if (st.shots && (st.shots[0] || st.shots[1])) rows.unshift(["Shots", st.shots]);
   $("statsBox").innerHTML = rows.map(([cap, [l, r]]) => {
     const tot = (l + r) || 1;
     return '<div class="stat"><div class="row"><b>' + l + '</b><span class="cap">' + cap + "</span><b>" + r + "</b></div>" +
       '<div class="sbar-wrap"><div class="half hl"><i style="width:' + (l / tot * 100) + '%"></i></div><div class="half hr"><i style="width:' + (r / tot * 100) + '%"></i></div></div></div>';
-  }).join("");
+  }).join("") || '<div class="empty">Waiting for match statistics…</div>';
 }
-
-const ICONS = { goal: "⚽", card_y: "🟨", card_r: "🟥", var: "📺", corner: "◤", shot: "◎", ft: "🏁" };
 
 function renderEvent(ev) {
-  if (ev.type === "odds") {
-    if (ev.minute) $("minute").textContent = ev.minute + "′";
-    for (const [k, id, pid] of [["home","o1","p1"],["draw","oX","pX"],["away","o2","p2"]]) {
-      const el = $(id), prev = parseFloat(el.textContent);
-      el.textContent = ev[k].toFixed(2);
-      const p = $(pid); p.classList.remove("up","down","flash");
-      if (!isNaN(prev) && ev[k] !== prev) { p.classList.add(ev[k] > prev ? "up" : "down", "flash"); setTimeout(() => p.classList.remove("flash"), 500); }
-    }
-    oddsSeries.push(ev); drawChart();
-    return;
+  if (ev.type !== "odds") return;
+  for (const [k, id, pid] of [["home","o1","p1"],["draw","oX","pX"],["away","o2","p2"]]) {
+    const el = $(id), prev = parseFloat(el.textContent);
+    el.textContent = ev[k].toFixed(2);
+    const p = $(pid); p.classList.remove("up","down","flash");
+    if (!isNaN(prev) && ev[k] !== prev) { p.classList.add(ev[k] > prev ? "up" : "down", "flash"); setTimeout(() => p.classList.remove("flash"), 500); }
   }
-  let ico = "•", cls = "", txt = "";
-  if (ev.type === "goal") { ico = ICONS.goal; cls = "goal"; txt = "Goal! " + ev.team + " — " + ev.score; }
-  else if (ev.type === "card") { ico = ev.card === "red" ? ICONS.card_r : ICONS.card_y; cls = ev.card === "red" ? "red" : ""; txt = (ev.card === "red" ? "Red card" : "Yellow card") + " — " + ev.team; }
-  else if (ev.type === "var") { ico = ICONS.var; cls = "var"; txt = "VAR review: " + ev.review; }
-  else if (ev.type === "var_end") { ico = ICONS.var; cls = "var"; txt = "VAR " + ev.outcome + (ev.score ? " — " + ev.score : ""); }
-  else if (ev.type === "corner") { ico = ICONS.corner; txt = "Corner — " + ev.team; }
-  else if (ev.type === "shot") { ico = ICONS.shot; txt = "Shot (" + ev.outcome + ") — " + ev.team; }
-  else if (ev.type === "full_time") { ico = ICONS.ft; cls = "goal"; txt = "Full time " + ev.score + " — winner: " + ev.winner; }
-  else return;
-  const d = document.createElement("div");
-  d.className = "tl " + cls;
-  d.innerHTML = '<span class="m">' + (ev.minute ?? "") + "′</span><span class=\"ico\">" + ico + '</span><span class="t">' + txt + "</span>";
-  const f = $("tb-details"); f.prepend(d);
-  while (f.children.length > 80) f.lastChild.remove();
+  oddsSeries.push(ev);
+  addOddsIncident(ev);
+  drawChart();
 }
 
-/* ===== right ===== */
-function renderAgent(agent) {
-  $("bankroll").textContent = "$" + agent.bankroll.toFixed(2);
-  $("bankroll").style.color = agent.bankroll >= 1000 ? "var(--green)" : "var(--red)";
-  const p = $("positions"); p.innerHTML = "";
-  const mk = (pos, open) => '<div class="pos"><div class="row1"><span>' + pos.team + " @ " + pos.odds + '</span><span class="pnl ' +
-    (open ? "open\">OPEN · $" + pos.stake : (pos.won ? "win" : "loss") + '">' + (pos.pnl >= 0 ? "+" : "") + pos.pnl.toFixed(2)) +
-    "</span></div><small>" + pos.rule + " · " + pos.minute + "′ · " + (pos.trigger || ("settled " + pos.finalScore)) + "</small></div>";
-  [...agent.open].reverse().forEach((x) => p.insertAdjacentHTML("beforeend", mk(x, true)));
-  [...agent.closed].reverse().forEach((x) => p.insertAdjacentHTML("beforeend", mk(x, false)));
-  if (!p.children.length) p.innerHTML = '<div class="empty">No positions yet — the agent is watching.</div>';
-}
-
-function renderJournal(e) {
-  const j = $("journal");
-  const label = e.kind === "decision" ? (e.action + " " + (e.position?.team || "") + " @" + (e.position?.odds ?? "")) : e.kind.replace("_", " ");
-  j.insertAdjacentHTML("afterbegin", '<div class="jentry"><b>' + label + "</b> <small>" + new Date(e.ts).toLocaleTimeString() + "</small><br>" +
-    '<span class="hash">#' + e.hash.slice(0, 18) + "…</span> <small>← #" + String(e.prevHash).slice(0, 10) + "…</small></div>");
-  while (j.children.length > 30) j.lastChild.remove();
+/* incidents from odds swings (until granular score incidents arrive) */
+let lastLogged = null;
+function addOddsIncident(ev) {
+  if (!lastLogged) { lastLogged = ev; return; }
+  for (const [k, label] of [["home", "1"], ["draw", "X"], ["away", "2"]]) {
+    const delta = (ev[k] - lastLogged[k]) / lastLogged[k];
+    if (Math.abs(delta) >= 0.08) {
+      const d = document.createElement("div");
+      d.className = "tl";
+      d.innerHTML = '<span class="m">' + new Date(ev.ts || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + '</span><span class="ico">' + (delta < 0 ? "📉" : "📈") + '</span><span class="t">Odds ' + label + " " + (delta < 0 ? "dropping" : "rising") + ": " + lastLogged[k].toFixed(2) + " → " + ev[k].toFixed(2) + "</span>";
+      const f = $("tb-details");
+      if (f.querySelector(".empty")) f.innerHTML = "";
+      f.prepend(d);
+      while (f.children.length > 60) f.lastChild.remove();
+      lastLogged = ev;
+      return;
+    }
+  }
 }
 
 /* tabs */
@@ -345,11 +284,10 @@ document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
   if (t.dataset.t === "odds") drawChart();
 });
 
-/* odds chart (its own tab, like SofaScore's Odds tab) */
 const canvas = $("chart"), ctx = canvas.getContext("2d");
 function drawChart() {
   if ($("tb-odds").style.display === "none") return;
-  const w = canvas.width = canvas.clientWidth, h = canvas.height = 300;
+  const w = canvas.width = canvas.clientWidth, h = canvas.height = 280;
   ctx.clearRect(0, 0, w, h);
   if (oddsSeries.length < 2) return;
   const all = oddsSeries.flatMap((o) => [o.home, o.away, o.draw]);
@@ -368,28 +306,12 @@ function drawChart() {
   ctx.fillText(max.toFixed(1), 8, 18); ctx.fillText(min.toFixed(1), 8, h - 18);
 }
 
-/* LIVE BY DEFAULT (SofaScore principle) — the server is already connected to
-   TxLINE; the page loads fixtures immediately and auto-selects the live one. */
-async function bootLive() {
+/* LIVE BY DEFAULT — no buttons, no friction */
+(async function boot() {
   try { await fetch("/api/live/connect", { method: "POST" }); } catch {}
-  const refresh = async () => {
-    try { fixturesCache = await (await fetch("/api/live/fixtures")).json(); } catch { return; }
-    renderMatchList();
-    if (selectedFixture == null && fixturesCache.length) {
-      const best = fixturesCache.find((f) => f.inRunning && f.odds) || fixturesCache.find((f) => f.odds);
-      if (best) watchFixture(best.fixtureId);
-    }
-  };
-  await refresh();
-  setInterval(refresh, 6000);
-}
-bootLive();
-
-$("btnVerify").onclick = async () => {
-  const r = await (await fetch("/api/journal/verify")).json();
-  $("verifyState").textContent = r.ok ? "✔ Chain intact — " + r.count + " entries — head #" + r.head.slice(0, 14) + "…" : "✘ BROKEN at " + r.brokenAt;
-  $("verifyState").style.color = r.ok ? "var(--green)" : "var(--red)";
-};
+  await refreshList();
+  listTimer = setInterval(refreshList, 5000);
+})();
 </script>
 </body>
 </html>

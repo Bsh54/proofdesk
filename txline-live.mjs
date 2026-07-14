@@ -41,13 +41,42 @@ export class TxLive {
     this.onStatus({ state: "connecting", api: creds.api });
     this.streamLoop(creds.api, jwt, creds.apiToken, "/api/odds/stream", (msg) => this.handleOdds(msg));
     this.streamLoop(creds.api, jwt, creds.apiToken, "/api/scores/stream", (msg) => this.handleScore(msg));
+    // fixture metadata (real team names) — refresh every 5 min
+    const refreshMeta = () => this.fetchFixtureMeta(creds.api, creds.apiToken).catch((e) => this.onStatus({ state: "meta_error", error: e.message }));
+    refreshMeta();
+    this.metaTimer = setInterval(refreshMeta, 5 * 60 * 1000);
+  }
+
+  async fetchFixtureMeta(api, apiToken) {
+    const jwt = await this.freshJwt(api);
+    const r = await fetch(`${api}/api/fixtures/snapshot`, { headers: { Authorization: `Bearer ${jwt}`, "X-Api-Token": apiToken } });
+    if (!r.ok) throw new Error(`fixtures/snapshot ${r.status}`);
+    const body = await r.json();
+    const list = Array.isArray(body) ? body : body.fixtures || body.Fixtures || body.data || [];
+    this.meta = this.meta || new Map();
+    for (const f of list) {
+      if (!f.FixtureId) continue;
+      const p1Home = f.Participant1IsHome !== false;
+      this.meta.set(f.FixtureId, {
+        home: p1Home ? f.Participant1 : f.Participant2,
+        away: p1Home ? f.Participant2 : f.Participant1,
+        competition: f.Competition || "FIFA World Cup 2026",
+        startTime: f.StartTime,
+      });
+    }
+    this.onStatus({ state: "meta_ok", fixtures: this.meta.size });
   }
 
   stop() {
     this.running = false;
+    if (this.metaTimer) clearInterval(this.metaTimer);
     for (const c of this.controllers) { try { c.abort(); } catch {} }
     this.controllers = [];
     this.onStatus({ state: "stopped" });
+  }
+
+  metaFor(fixtureId) {
+    return (this.meta && this.meta.get(fixtureId)) || null;
   }
 
   async streamLoop(api, jwt, apiToken, path, handler) {

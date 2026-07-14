@@ -289,6 +289,10 @@ function replayUpdateState(s, ev) {
 
 let live = null;
 let liveSession = null; // { fixtureId, agent, startTs, match }
+const scoreStates = new Map(); // fixtureId -> decoded match state (all fixtures)
+
+// SofaScore game-state mapping (TxLINE StatusId -> status object)
+const PHASES = { 1: "Not started", 2: "1st half", 3: "Halftime", 4: "2nd half", 5: "ET 1st", 6: "ET break", 7: "ET 2nd", 8: "Penalties", 10: "Finished", 19: "Postponed" };
 
 function liveMinute(ts) {
   return Math.max(0, Math.round((ts - liveSession.startTs) / 60000));
@@ -299,18 +303,23 @@ function ensureLive() {
   live = new TxLive({
     onStatus: (s) => broadcast({ kind: "live_status", ...s }),
     onScore: (s) => {
-      broadcast({ kind: "live_score", ev: s });
       const m = s.raw;
-      if (!liveSession || !m || m.FixtureId !== liveSession.fixtureId) return;
-      const st = liveSession.state || (liveSession.state = blankMatchState());
+      if (!m || !m.FixtureId) return;
+      // Track state for EVERY fixture (SofaScore event model), not only the watched one.
+      const st = scoreStates.get(m.FixtureId) || blankMatchState();
       if (m.Clock?.Seconds != null) st.minute = Math.floor(m.Clock.Seconds / 60);
       if (m.GameState) st.gameState = m.GameState;
+      if (m.StatusId != null) st.statusId = m.StatusId;
       if (m.Possession != null) st.possession = m.Possession;
       if (m.Stats) {
         const d = decodeTxStats(m.Stats);
         st.score = d.score; st.yellow = d.yellow; st.red = d.red; st.corners = d.corners;
       }
-      broadcast({ kind: "match_state", state: st });
+      scoreStates.set(m.FixtureId, st);
+      if (liveSession && m.FixtureId === liveSession.fixtureId) {
+        liveSession.state = st;
+        broadcast({ kind: "match_state", state: st });
+      }
     },
     onOdds: (o) => {
       broadcast({ kind: "live_odds_all", fixtureId: o.fixtureId, odds: { home: o.home, draw: o.draw, away: o.away }, inRunning: o.inRunning });
@@ -341,6 +350,33 @@ app.post("/api/replay/start", (req, res) => {
 });
 app.post("/api/replay/stop", (_req, res) => { stopReplay(); res.json({ ok: true }); });
 
+// --- SofaScore-shaped events API (our data, their JSON design) ---
+app.get("/api/events/live", (_req, res) => {
+  const fixtures = live ? live.listFixtures() : [];
+  const events = fixtures.map((f) => {
+    const meta = live.metaFor(f.fixtureId);
+    const st = scoreStates.get(f.fixtureId);
+    const inplay = f.inRunning || (st && st.gameState && !["Finished", "Not started", "scheduled"].includes(st.gameState));
+    return {
+      id: f.fixtureId,
+      tournament: { name: meta?.competition || "FIFA World Cup 2026", category: { name: "World", sport: { name: "Football" } } },
+      status: {
+        code: st?.statusId ?? (inplay ? 2 : 1),
+        description: st ? (PHASES[st.statusId] || st.gameState || "") : (inplay ? "In progress" : "Not started"),
+        type: inplay ? "inprogress" : "notstarted",
+      },
+      homeTeam: { name: meta?.home || `Home #${f.fixtureId}`, id: f.fixtureId },
+      awayTeam: { name: meta?.away || `Away #${f.fixtureId}`, id: f.fixtureId },
+      homeScore: { current: st?.score?.[0] ?? 0, display: st?.score?.[0] ?? 0 },
+      awayScore: { current: st?.score?.[1] ?? 0, display: st?.score?.[1] ?? 0 },
+      time: { minute: st?.minute ?? null },
+      startTimestamp: meta?.startTime ? Math.floor(meta.startTime / 1000) : null,
+      odds: f.odds || null,
+    };
+  });
+  res.json({ events });
+});
+
 // --- LIVE mode ---
 app.post("/api/live/connect", async (_req, res) => {
   try { await ensureLive().start(); res.json({ ok: true }); }
@@ -351,11 +387,13 @@ app.post("/api/live/watch", (req, res) => {
   const { fixtureId } = req.body || {};
   if (!fixtureId) return res.status(400).json({ ok: false, error: "fixtureId required" });
   stopReplay();
+  const meta = live ? live.metaFor(Number(fixtureId)) : null;
   liveSession = {
     fixtureId: Number(fixtureId),
     agent: makeAgentState(),
     startTs: Date.now(),
-    match: { seed: `live-${fixtureId}`, home: `HOME #${fixtureId}`, away: `AWAY #${fixtureId}` },
+    state: scoreStates.get(Number(fixtureId)) || null,
+    match: { seed: "LIVE", home: meta?.home || `Home #${fixtureId}`, away: meta?.away || `Away #${fixtureId}` },
   };
   journalAppend({ kind: "session_start", mode: "LIVE", fixtureId: Number(fixtureId), source: "TxLINE" });
   broadcast({ kind: "session", match: { home: liveSession.match.home, away: liveSession.match.away, seed: "LIVE" }, agent: liveSession.agent });
