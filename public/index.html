@@ -280,12 +280,25 @@ async function renderPregame(e) {
     '<div style="display:flex;justify-content:space-between;color:var(--dim);font-size:12px;margin-top:5px">' +
       "<span>" + e.homeTeam.name + " " + wp.home + "%</span><span>Draw " + wp.draw + "%</span><span>" + e.awayTeam.name + " " + wp.away + "%</span></div>"
   ) : '<div class="empty">Market not open yet — win probability will appear when bookmakers open this match (usually 1-2 days before kick-off).</div>';
+  const badge = (r) => '<span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;font-size:11px;font-weight:800;color:#fff;margin-right:4px;background:' + (r === "W" ? "var(--green)" : r === "L" ? "var(--live)" : "#5a6472") + '">' + r + "</span>";
+  const formRow = (name, form) => '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #1a212b"><span>' + flagImg(name, 20) + " " + name + "</span><span>" +
+    (form && form.length ? form.map((f) => badge(f.result)).join("") : '<small style="color:var(--dimmer)">no matches tracked yet</small>') + "</span></div>";
+  const formDetail = (form) => form && form.length ? form.map((f) => '<div style="color:var(--dimmer);font-size:11.5px;padding:2px 0">' + badge(f.result) + (f.home ? "vs " : "@ ") + f.opponent + "  " + f.score + "</div>").join("") : "";
+  const movement = pg.oddsMovement ? (() => {
+    const mv = (o, c, lbl) => { const d = c - o; const arr = d > 0.005 ? ' <span style="color:var(--red)">▲</span>' : d < -0.005 ? ' <span style="color:var(--green)">▼</span>' : ""; return '<div class="mc"><span class="n">' + lbl + '</span><span class="v">' + o.toFixed(2) + " → " + c.toFixed(2) + arr + "</span></div>"; };
+    return '<div class="secttl" style="margin-top:16px">Odds movement since opening</div><div class="mchoices">' +
+      mv(pg.oddsMovement.opening.home, pg.oddsMovement.current.home, "1") + mv(pg.oddsMovement.opening.draw, pg.oddsMovement.current.draw, "X") + mv(pg.oddsMovement.opening.away, pg.oddsMovement.current.away, "2") + "</div>";
+  })() : "";
   box.innerHTML =
     '<div style="text-align:center;padding:14px 0 18px">' +
       '<div style="color:var(--dimmer);font-size:12px;letter-spacing:1px;text-transform:uppercase">Kick-off</div>' +
       '<div style="font-size:26px;font-weight:800;margin:4px 0" id="koTime">' + (ko ? ko.toLocaleString([], { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—") + "</div>" +
       '<div style="color:var(--live);font-weight:700" id="koCount">Starts in ' + countdown() + "</div>" +
     "</div>" + probBar +
+    '<div class="secttl" style="margin-top:16px">Team form — tournament matches tracked on this platform</div>' +
+    formRow(e.homeTeam.name, pg.homeForm) + formDetail(pg.homeForm) +
+    formRow(e.awayTeam.name, pg.awayForm) + formDetail(pg.awayForm) +
+    movement +
     '<div class="secttl" style="margin-top:16px">Markets open</div>' +
     '<div style="color:var(--dim)">' + (pg.marketsOpen || 0) + " markets streaming for this match — see the Odds tab.</div>";
   if (pregameTimer) clearInterval(pregameTimer);

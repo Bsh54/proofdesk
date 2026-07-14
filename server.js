@@ -503,6 +503,33 @@ app.get("/api/events/:id/statistics", (req, res) => {
   res.json({ statistics });
 });
 
+// Team form built from OUR observed archive: every finished fixture this
+// platform has tracked contributes a W/D/L entry for both teams.
+function teamForm(teamName, excludeId) {
+  if (!live || !teamName) return [];
+  const out = [];
+  for (const fid of live.allFixtureIds()) {
+    if (fid === excludeId) continue;
+    const meta = live.metaFor(fid);
+    const st = scoreStates.get(fid);
+    if (!meta || !st || !st.score) continue;
+    const isHome = meta.home === teamName, isAway = meta.away === teamName;
+    if (!isHome && !isAway) continue;
+    const started = meta.startTime && meta.startTime <= Date.now();
+    const over = started && Date.now() - meta.startTime > 125 * 60 * 1000;
+    if (!over) continue;
+    const [gh, ga] = st.score;
+    const mine = isHome ? gh : ga, theirs = isHome ? ga : gh;
+    out.push({
+      opponent: isHome ? meta.away : meta.home,
+      score: `${gh}-${ga}`, home: isHome,
+      result: mine > theirs ? "W" : mine < theirs ? "L" : "D",
+      startTime: meta.startTime, competition: meta.competition,
+    });
+  }
+  return out.sort((a, b) => b.startTime - a.startTime).slice(0, 5);
+}
+
 // Pre-game endpoint — market-implied win probability (demargined consensus),
 // same display concept as the "who will win" bar, but based on real prices.
 app.get("/api/events/:id/pregame", (req, res) => {
@@ -519,11 +546,15 @@ app.get("/api/events/:id/pregame", (req, res) => {
     }
     winProbability = { home: +pct[0].toFixed(1), draw: +pct[1].toFixed(1), away: +pct[2].toFixed(1) };
   }
+  const opening = live ? live.openingFor(id) : null;
   res.json({
     kickoff: meta?.startTime || null,
     competition: meta?.competition || null,
     winProbability,
     marketsOpen: live ? live.bookFor(id).length : 0,
+    oddsMovement: opening && odds ? { opening: { home: opening.home, draw: opening.draw, away: opening.away }, current: { home: odds.home, draw: odds.draw, away: odds.away } } : null,
+    homeForm: teamForm(meta?.home, id),
+    awayForm: teamForm(meta?.away, id),
   });
 });
 
@@ -539,7 +570,7 @@ app.get("/api/events/:id/odds", (req, res) => {
   const MARKET_LABELS = { "1X2_PARTICIPANT_RESULT": "Full time result", "OVERUNDER_PARTICIPANT_GOALS": "Total goals", "ASIANHANDICAP_PARTICIPANT_GOALS": "Asian handicap" };
   const CHOICE_LABELS = { part1: "1", draw: "X", part2: "2", over: "Over", under: "Under" };
   const markets = book.map((b) => ({
-    marketName: MARKET_LABELS[b.type] || b.type,
+    marketName: (MARKET_LABELS[b.type] || b.type) + (b.period ? " — " + b.period.replace("half=1", "1st half").replace("half=2", "2nd half") : ""),
     marketParams: b.params,
     choices: b.names.map((n, i) => ({
       name: CHOICE_LABELS[n] || n,

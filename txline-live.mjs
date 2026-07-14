@@ -106,6 +106,7 @@ export class TxLive {
   oddsFor(fixtureId) { return this.fixtures.get(fixtureId)?.lastOdds || null; }
   inRunningFor(fixtureId) { return this.fixtures.get(fixtureId)?.lastOdds?.inRunning || false; }
   bookFor(fixtureId) { const b = this.fixtures.get(fixtureId)?.book; return b ? [...b.values()] : []; }
+  openingFor(fixtureId) { return this.fixtures.get(fixtureId)?.openingOdds || null; }
 
   async streamLoop(api, jwt, apiToken, path, handler) {
     while (this.running) {
@@ -154,21 +155,23 @@ export class TxLive {
     // full market book: latest prices per market+line, with previous for movement arrows
     if (Array.isArray(m.Prices) && m.PriceNames) {
       fx.book = fx.book || new Map();
-      const key = m.SuperOddsType + "|" + (m.MarketParameters || "");
+      const key = m.SuperOddsType + "|" + (m.MarketParameters || "") + "|" + (m.MarketPeriod || "FT");
       const prevEntry = fx.book.get(key);
       fx.book.set(key, {
-        type: m.SuperOddsType, params: m.MarketParameters || null,
+        type: m.SuperOddsType, params: m.MarketParameters || null, period: m.MarketPeriod || null,
         names: m.PriceNames, prices: m.Prices.map((p) => p / 1000),
         prev: prevEntry ? prevEntry.prices : null, ts: m.Ts,
       });
     }
-    if (m.SuperOddsType === "1X2_PARTICIPANT_RESULT" && Array.isArray(m.Prices) && m.Prices.length === 3) {
+    // main 1X2 = FULL TIME only (half-time markets carry MarketPeriod like "half=1")
+    if (m.SuperOddsType === "1X2_PARTICIPANT_RESULT" && !m.MarketPeriod && Array.isArray(m.Prices) && m.Prices.length === 3) {
       const odds = {
         type: "odds", fixtureId: m.FixtureId, messageId: m.MessageId, ts: m.Ts,
         home: m.Prices[0] / 1000, draw: m.Prices[1] / 1000, away: m.Prices[2] / 1000,
         pct: m.Pct, inRunning: !!m.InRunning, bookmaker: m.Bookmaker,
       };
       fx.lastOdds = odds;
+      if (!fx.openingOdds) fx.openingOdds = { home: odds.home, draw: odds.draw, away: odds.away, ts: odds.ts };
       this.fixtures.set(m.FixtureId, fx);
       this.onOdds(odds);
     } else {
