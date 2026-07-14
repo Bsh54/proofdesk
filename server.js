@@ -258,13 +258,15 @@ function blankMatchState() {
 // Decode TxLINE period-prefixed stat keys: "1001" = period1+stat001.
 // stat n: 1,2=goals 3,4=yellow 5,6=red 7,8=corners (per team)
 function decodeTxStats(st = {}) {
+  const per = (p, n) => st[String(p * 1000 + n)] ?? 0;
   const g = (n) => {
     if (st[String(n)] != null) return st[String(n)];
     let s = 0;
-    for (let p = 1; p <= 9; p++) { const k = String(p * 1000 + n); if (st[k] != null) s += st[k]; }
+    for (let p = 1; p <= 9; p++) s += per(p, n);
     return s;
   };
-  return { score: [g(1), g(2)], yellow: [g(3), g(4)], red: [g(5), g(6)], corners: [g(7), g(8)] };
+  const bundle = (get) => ({ score: [get(1), get(2)], yellow: [get(3), get(4)], red: [get(5), get(6)], corners: [get(7), get(8)] });
+  return { ...bundle(g), periods: { "1ST": bundle((n) => per(1, n)), "2ND": bundle((n) => per(2, n)) } };
 }
 
 function replayUpdateState(s, ev) {
@@ -358,7 +360,14 @@ function ensureLive() {
       if (m.Stats) {
         const d = decodeTxStats(m.Stats);
         st.score = d.score; st.yellow = d.yellow; st.red = d.red; st.corners = d.corners;
+        st.periods = d.periods;
       }
+      // possession share: accumulate which side holds the ball, message by message
+      st.poss = st.poss || [0, 0];
+      if (m.Possession === 1 || m.Possession === "1") st.poss[0]++;
+      else if (m.Possession === 2 || m.Possession === "2") st.poss[1]++;
+      // attack momentum (event-weighted, decaying wave from -100 away to +100 home)
+      updateMomentum(m.FixtureId, st, m);
       scoreStates.set(m.FixtureId, st);
       detectIncidents(m.FixtureId, prev, st, m);
       if (liveSession && m.FixtureId === liveSession.fixtureId) {
@@ -395,6 +404,31 @@ app.post("/api/replay/start", (req, res) => {
 });
 app.post("/api/replay/stop", (_req, res) => { stopReplay(); res.json({ ok: true }); });
 
+// ---------------------------------------------------------------------------
+// ATTACK MOMENTUM — one point per minute, value -100 (away) .. +100 (home),
+// event-weighted with decay. Same graph model as leading livescore apps.
+// ---------------------------------------------------------------------------
+const momentumMap = new Map(); // fixtureId -> [{minute, value}]
+
+function updateMomentum(fixtureId, st, m) {
+  const minute = st.minute ?? 0;
+  const side = (m.Possession === 1 || m.Possession === "1") ? 1 : (m.Possession === 2 || m.Possession === "2") ? -1 : 0;
+  const a = String(m.Action || "").toLowerCase();
+  let w = 4;
+  if (a.includes("danger")) w = 18;
+  else if (a.includes("shot")) w = 26;
+  else if (a.includes("attack")) w = 11;
+  else if (a.includes("corner")) w = 14;
+  else if (a.includes("free_kick")) w = 9;
+  const pts = momentumMap.get(fixtureId) || [];
+  const prevVal = pts.length ? pts[pts.length - 1].value : 0;
+  const value = Math.max(-100, Math.min(100, Math.round(prevVal * 0.82 + w * side)));
+  if (pts.length && pts[pts.length - 1].minute === minute) pts[pts.length - 1].value = value;
+  else pts.push({ minute, value });
+  if (pts.length > 140) pts.shift();
+  momentumMap.set(fixtureId, pts);
+}
+
 // --- Events API (event-centric JSON model) ---
 // Full schedule: every known fixture (snapshot metadata + streams), so the
 // list always shows upcoming, live and finished matches — never an empty page.
@@ -406,8 +440,11 @@ app.get("/api/events/live", (_req, res) => {
     const st = scoreStates.get(id);
     const scoreSum = (st?.score?.[0] ?? 0) + (st?.score?.[1] ?? 0);
     const started = meta?.startTime ? meta.startTime <= now : false;
-    const inplay = live.inRunningFor(id) || (st && [2, 3, 4, 5, 6, 7, 8].includes(st.statusId));
-    const finished = !inplay && (st?.statusId === 10 || (started && scoreSum >= 0 && st && st.minute >= 85) );
+    const streamLive = live.inRunningFor(id); // odds still flowing = truly live
+    // finished wins over stale in-play status: explicit FT, or kickoff >2h30 ago with no live odds
+    const longOver = meta?.startTime ? now - meta.startTime > 125 * 60 * 1000 : false;
+    const finished = !streamLive && (st?.statusId === 10 || (started && longOver));
+    const inplay = !finished && (streamLive || (st && [2, 3, 4, 5, 6, 7, 8].includes(st.statusId)));
     const type = inplay ? "inprogress" : finished ? "finished" : "notstarted";
     return {
       id,
@@ -435,6 +472,61 @@ app.get("/api/events/live", (_req, res) => {
 // Incidents endpoint (per-event incident list)
 app.get("/api/events/:id/incidents", (req, res) => {
   res.json({ incidents: incidentsMap.get(Number(req.params.id)) || [] });
+});
+
+// Statistics endpoint — periods ALL / 1ST / 2ND, groups, pre-chewed items
+// (compareCode tells the frontend which side to highlight: 1 home, 2 away, 3 equal)
+app.get("/api/events/:id/statistics", (req, res) => {
+  const st = scoreStates.get(Number(req.params.id));
+  if (!st) return res.json({ statistics: [] });
+  const item = (name, h, a, suffix = "") => ({
+    name, home: `${h}${suffix}`, away: `${a}${suffix}`, homeValue: h, awayValue: a,
+    compareCode: h > a ? 1 : a > h ? 2 : 3, statisticsType: "positive", valueType: "team",
+  });
+  const bundleItems = (b, withPoss) => {
+    const items = [];
+    if (withPoss && st.poss && (st.poss[0] + st.poss[1]) > 10) {
+      const tot = st.poss[0] + st.poss[1];
+      items.push(item("Ball possession", Math.round(st.poss[0] / tot * 100), Math.round(st.poss[1] / tot * 100), "%"));
+    }
+    items.push(item("Corner kicks", b.corners[0], b.corners[1]));
+    items.push(item("Yellow cards", b.yellow[0], b.yellow[1]));
+    items.push(item("Red cards", b.red[0], b.red[1]));
+    return items;
+  };
+  const statistics = [{ period: "ALL", groups: [{ groupName: "Match overview", statisticsItems: bundleItems(st, true) }] }];
+  if (st.periods) {
+    for (const p of ["1ST", "2ND"]) {
+      statistics.push({ period: p, groups: [{ groupName: "Match overview", statisticsItems: bundleItems(st.periods[p], false) }] });
+    }
+  }
+  res.json({ statistics });
+});
+
+// Attack momentum graph — {graphPoints:[{minute,value}], periodTime, periodCount}
+app.get("/api/events/:id/graph", (req, res) => {
+  res.json({ graphPoints: momentumMap.get(Number(req.params.id)) || [], periodTime: 45, periodCount: 2 });
+});
+
+// Odds endpoint — full market book with movement direction per choice
+app.get("/api/events/:id/odds", (req, res) => {
+  if (!live) return res.json({ markets: [] });
+  const book = live.bookFor(Number(req.params.id));
+  const MARKET_LABELS = { "1X2_PARTICIPANT_RESULT": "Full time result", "OVERUNDER_PARTICIPANT_GOALS": "Total goals", "ASIANHANDICAP_PARTICIPANT_GOALS": "Asian handicap" };
+  const CHOICE_LABELS = { part1: "1", draw: "X", part2: "2", over: "Over", under: "Under" };
+  const markets = book.map((b) => ({
+    marketName: MARKET_LABELS[b.type] || b.type,
+    marketParams: b.params,
+    choices: b.names.map((n, i) => ({
+      name: CHOICE_LABELS[n] || n,
+      value: b.prices[i].toFixed(2),
+      change: b.prev ? Math.sign(b.prices[i] - b.prev[i]) : 0,
+    })),
+    ts: b.ts,
+  }));
+  const order = { "Full time result": 0, "Total goals": 1, "Asian handicap": 2 };
+  markets.sort((a, b) => (order[a.marketName] ?? 9) - (order[b.marketName] ?? 9) || parseFloat((a.marketParams || "0").replace("line=", "")) - parseFloat((b.marketParams || "0").replace("line=", "")));
+  res.json({ markets });
 });
 
 // --- LIVE mode ---

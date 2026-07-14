@@ -65,6 +65,22 @@ export class TxLive {
       });
     }
     this.onStatus({ state: "meta_ok", fixtures: this.meta.size });
+    // Hydrate the current/final state of every fixture from snapshots, so
+    // finished and not-yet-streamed matches always carry a correct score.
+    for (const id of this.meta.keys()) this.fetchScoreSnapshot(api, apiToken, id).catch(() => {});
+  }
+
+  async fetchScoreSnapshot(api, apiToken, fixtureId) {
+    const jwt = await this.freshJwt(api);
+    const r = await fetch(`${api}/api/scores/snapshot/${fixtureId}`, { headers: { Authorization: `Bearer ${jwt}`, "X-Api-Token": apiToken } });
+    if (!r.ok) return;
+    const body = await r.json();
+    const list = Array.isArray(body) ? body : body.snapshots || body.data || [body];
+    const last = list[list.length - 1];
+    if (last && (last.FixtureId || fixtureId)) {
+      if (!last.FixtureId) last.FixtureId = fixtureId;
+      this.onScore({ type: "score_raw", fixtureId: last.FixtureId, ts: last.Ts || Date.now(), raw: last });
+    }
   }
 
   stop() {
@@ -89,6 +105,7 @@ export class TxLive {
 
   oddsFor(fixtureId) { return this.fixtures.get(fixtureId)?.lastOdds || null; }
   inRunningFor(fixtureId) { return this.fixtures.get(fixtureId)?.lastOdds?.inRunning || false; }
+  bookFor(fixtureId) { const b = this.fixtures.get(fixtureId)?.book; return b ? [...b.values()] : []; }
 
   async streamLoop(api, jwt, apiToken, path, handler) {
     while (this.running) {
@@ -134,6 +151,17 @@ export class TxLive {
     const fx = this.fixtures.get(m.FixtureId) || { markets: new Set() };
     fx.lastSeen = Date.now();
     fx.markets.add(m.SuperOddsType);
+    // full market book: latest prices per market+line, with previous for movement arrows
+    if (Array.isArray(m.Prices) && m.PriceNames) {
+      fx.book = fx.book || new Map();
+      const key = m.SuperOddsType + "|" + (m.MarketParameters || "");
+      const prevEntry = fx.book.get(key);
+      fx.book.set(key, {
+        type: m.SuperOddsType, params: m.MarketParameters || null,
+        names: m.PriceNames, prices: m.Prices.map((p) => p / 1000),
+        prev: prevEntry ? prevEntry.prices : null, ts: m.Ts,
+      });
+    }
     if (m.SuperOddsType === "1X2_PARTICIPANT_RESULT" && Array.isArray(m.Prices) && m.Prices.length === 3) {
       const odds = {
         type: "odds", fixtureId: m.FixtureId, messageId: m.MessageId, ts: m.Ts,
