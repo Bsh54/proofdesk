@@ -230,6 +230,7 @@ function startReplay(seed = 42, speed = 20) {
     if (!s || s.cursor >= s.match.timeline.length) return stopReplay();
     const ev = s.match.timeline[s.cursor++];
     broadcast({ kind: "event", ev });
+    replayUpdateState(s, ev);
     const decisions = agentOnTick(s, ev);
     for (const d of decisions) broadcast({ kind: "decision", ...d });
     broadcast({ kind: "agent", agent: { bankroll: s.agent.bankroll, open: s.agent.openPositions, closed: s.agent.closedPositions } });
@@ -244,6 +245,40 @@ function stopReplay() {
   const s = sessions.get("current");
   if (s?.timer) clearTimeout(s.timer);
   sessions.delete("current");
+}
+
+// ---------------------------------------------------------------------------
+// 4a-bis. MATCH STATE — SofaScore-style aggregated state (score, stats, clock)
+// ---------------------------------------------------------------------------
+
+function blankMatchState() {
+  return { minute: 0, gameState: "—", score: [0, 0], corners: [0, 0], yellow: [0, 0], red: [0, 0], shots: [0, 0], possession: null };
+}
+
+// Decode TxLINE period-prefixed stat keys: "1001" = period1+stat001.
+// stat n: 1,2=goals 3,4=yellow 5,6=red 7,8=corners (per team)
+function decodeTxStats(st = {}) {
+  const g = (n) => {
+    if (st[String(n)] != null) return st[String(n)];
+    let s = 0;
+    for (let p = 1; p <= 9; p++) { const k = String(p * 1000 + n); if (st[k] != null) s += st[k]; }
+    return s;
+  };
+  return { score: [g(1), g(2)], yellow: [g(3), g(4)], red: [g(5), g(6)], corners: [g(7), g(8)] };
+}
+
+function replayUpdateState(s, ev) {
+  const st = s.state || (s.state = blankMatchState());
+  st.minute = ev.minute ?? st.minute;
+  const isHome = ev.team === s.match.home ? 0 : 1;
+  if (ev.type === "goal") { const [h, a] = ev.score.split("-").map(Number); st.score = [h, a]; }
+  if (ev.type === "var_end" && ev.score) { const [h, a] = ev.score.split("-").map(Number); st.score = [h, a]; }
+  if (ev.type === "corner") st.corners[isHome]++;
+  if (ev.type === "shot") st.shots[isHome]++;
+  if (ev.type === "card") (ev.card === "red" ? st.red : st.yellow)[isHome]++;
+  if (ev.type === "full_time") st.gameState = "Finished";
+  else if (ev.minute > 0) st.gameState = ev.minute <= 45 ? "1st half" : "2nd half";
+  broadcast({ kind: "match_state", state: st });
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +298,20 @@ function ensureLive() {
   if (live) return live;
   live = new TxLive({
     onStatus: (s) => broadcast({ kind: "live_status", ...s }),
-    onScore: (s) => broadcast({ kind: "live_score", ev: s }),
+    onScore: (s) => {
+      broadcast({ kind: "live_score", ev: s });
+      const m = s.raw;
+      if (!liveSession || !m || m.FixtureId !== liveSession.fixtureId) return;
+      const st = liveSession.state || (liveSession.state = blankMatchState());
+      if (m.Clock?.Seconds != null) st.minute = Math.floor(m.Clock.Seconds / 60);
+      if (m.GameState) st.gameState = m.GameState;
+      if (m.Possession != null) st.possession = m.Possession;
+      if (m.Stats) {
+        const d = decodeTxStats(m.Stats);
+        st.score = d.score; st.yellow = d.yellow; st.red = d.red; st.corners = d.corners;
+      }
+      broadcast({ kind: "match_state", state: st });
+    },
     onOdds: (o) => {
       broadcast({ kind: "live_odds_all", fixtureId: o.fixtureId, odds: { home: o.home, draw: o.draw, away: o.away }, inRunning: o.inRunning });
       if (!liveSession || o.fixtureId !== liveSession.fixtureId) return;
