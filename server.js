@@ -6,7 +6,7 @@ import express from "express";
 import { WebSocketServer } from "ws";
 import { createServer } from "http";
 import { createHash, randomUUID } from "crypto";
-import { readFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
+import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { TxLive } from "./txline-live.mjs";
@@ -291,6 +291,18 @@ let live = null;
 let liveSession = null; // { fixtureId, agent, startTs, match }
 const scoreStates = new Map(); // fixtureId -> decoded match state (all fixtures)
 
+// Persist score states across restarts (finished matches keep their score).
+const STATES_FILE = join(DATA_DIR, "score-states.json");
+try {
+  if (existsSync(STATES_FILE)) {
+    for (const [k, v] of Object.entries(JSON.parse(readFileSync(STATES_FILE, "utf8")))) scoreStates.set(Number(k), v);
+    console.log(`restored ${scoreStates.size} score states`);
+  }
+} catch {}
+setInterval(() => {
+  try { writeFileSync(STATES_FILE, JSON.stringify(Object.fromEntries(scoreStates))); } catch {}
+}, 20000);
+
 // Game-state mapping (TxLINE StatusId -> status object)
 const PHASES = { 1: "Not started", 2: "1st half", 3: "Halftime", 4: "2nd half", 5: "ET 1st", 6: "ET break", 7: "ET 2nd", 8: "Penalties", 10: "Finished", 19: "Postponed" };
 
@@ -384,29 +396,39 @@ app.post("/api/replay/start", (req, res) => {
 app.post("/api/replay/stop", (_req, res) => { stopReplay(); res.json({ ok: true }); });
 
 // --- Events API (event-centric JSON model) ---
+// Full schedule: every known fixture (snapshot metadata + streams), so the
+// list always shows upcoming, live and finished matches — never an empty page.
 app.get("/api/events/live", (_req, res) => {
-  const fixtures = live ? live.listFixtures() : [];
-  const events = fixtures.map((f) => {
-    const meta = live.metaFor(f.fixtureId);
-    const st = scoreStates.get(f.fixtureId);
-    const inplay = f.inRunning || (st && [2, 3, 4, 5, 6, 7, 8].includes(st.statusId));
+  if (!live) return res.json({ events: [] });
+  const now = Date.now();
+  const events = live.allFixtureIds().map((id) => {
+    const meta = live.metaFor(id);
+    const st = scoreStates.get(id);
+    const scoreSum = (st?.score?.[0] ?? 0) + (st?.score?.[1] ?? 0);
+    const started = meta?.startTime ? meta.startTime <= now : false;
+    const inplay = live.inRunningFor(id) || (st && [2, 3, 4, 5, 6, 7, 8].includes(st.statusId));
+    const finished = !inplay && (st?.statusId === 10 || (started && scoreSum >= 0 && st && st.minute >= 85) );
+    const type = inplay ? "inprogress" : finished ? "finished" : "notstarted";
     return {
-      id: f.fixtureId,
+      id,
       tournament: { name: meta?.competition || "FIFA World Cup 2026", category: { name: "World", sport: { name: "Football" } } },
       status: {
-        code: st?.statusId ?? (inplay ? 2 : 1),
-        description: st ? (PHASES[st.statusId] || st.gameState || "") : (inplay ? "In progress" : "Not started"),
-        type: inplay ? "inprogress" : "notstarted",
+        code: st?.statusId ?? (inplay ? 2 : finished ? 10 : 1),
+        description: inplay ? (PHASES[st?.statusId] || "In progress") : finished ? "FT" : "Not started",
+        type,
       },
-      homeTeam: { name: meta?.home || `Home #${f.fixtureId}`, id: f.fixtureId },
-      awayTeam: { name: meta?.away || `Away #${f.fixtureId}`, id: f.fixtureId },
+      homeTeam: { name: meta?.home || `Home #${id}`, id },
+      awayTeam: { name: meta?.away || `Away #${id}`, id },
       homeScore: { current: st?.score?.[0] ?? 0, display: st?.score?.[0] ?? 0 },
       awayScore: { current: st?.score?.[1] ?? 0, display: st?.score?.[1] ?? 0 },
       time: { minute: st?.minute ?? null },
       startTimestamp: meta?.startTime ? Math.floor(meta.startTime / 1000) : null,
-      odds: f.odds || null,
+      odds: live.oddsFor(id) ? { home: live.oddsFor(id).home, draw: live.oddsFor(id).draw, away: live.oddsFor(id).away } : null,
     };
   });
+  // in-play first, then upcoming by start time, finished last
+  const rank = { inprogress: 0, notstarted: 1, finished: 2 };
+  events.sort((a, b) => rank[a.status.type] - rank[b.status.type] || (a.startTimestamp || 9e12) - (b.startTimestamp || 9e12));
   res.json({ events });
 });
 

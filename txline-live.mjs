@@ -79,6 +79,17 @@ export class TxLive {
     return (this.meta && this.meta.get(fixtureId)) || null;
   }
 
+  // Union of every fixture we know about: full schedule (meta) + anything
+  // seen on the odds stream. This is what powers the schedule-style list.
+  allFixtureIds() {
+    const ids = new Set(this.fixtures.keys());
+    if (this.meta) for (const k of this.meta.keys()) ids.add(k);
+    return [...ids];
+  }
+
+  oddsFor(fixtureId) { return this.fixtures.get(fixtureId)?.lastOdds || null; }
+  inRunningFor(fixtureId) { return this.fixtures.get(fixtureId)?.lastOdds?.inRunning || false; }
+
   async streamLoop(api, jwt, apiToken, path, handler) {
     while (this.running) {
       const ctrl = new AbortController();

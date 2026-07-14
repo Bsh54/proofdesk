@@ -189,7 +189,8 @@ function renderList() {
     const live = e.status.type === "inprogress";
     const sel = e.id === selectedId ? " sel" : "";
     const st = live ? '<span class="st live">' + (e.time.minute != null ? e.time.minute + "′" : "LIVE") + "</span>"
-      : '<span class="st">' + (e.startTimestamp ? new Date(e.startTimestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—") + "</span>";
+      : e.status.type === "finished" ? '<span class="st">FT</span>'
+      : '<span class="st">' + (e.startTimestamp ? new Date(e.startTimestamp * 1000).toLocaleDateString([], { day: "2-digit", month: "2-digit" }) + "<br>" + new Date(e.startTimestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—") + "</span>";
     return '<div class="mrow' + sel + '" data-id="' + e.id + '">' + st +
       '<span class="tms"><span>' + e.homeTeam.name + "</span><span>" + e.awayTeam.name + "</span></span>" +
       '<span class="scs' + (live ? " live" : "") + '"><span>' + e.homeScore.display + "</span><span>" + e.awayScore.display + "</span></span></div>";
