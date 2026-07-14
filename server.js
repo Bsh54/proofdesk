@@ -503,6 +503,30 @@ app.get("/api/events/:id/statistics", (req, res) => {
   res.json({ statistics });
 });
 
+// Pre-game endpoint — market-implied win probability (demargined consensus),
+// same display concept as the "who will win" bar, but based on real prices.
+app.get("/api/events/:id/pregame", (req, res) => {
+  const id = Number(req.params.id);
+  const meta = live ? live.metaFor(id) : null;
+  const odds = live ? live.oddsFor(id) : null;
+  let winProbability = null;
+  if (odds) {
+    let pct = Array.isArray(odds.pct) ? odds.pct.map(parseFloat) : [];
+    if (pct.length !== 3 || pct.some(isNaN)) {
+      const inv = [1 / odds.home, 1 / odds.draw, 1 / odds.away];
+      const s = inv[0] + inv[1] + inv[2];
+      pct = inv.map((v) => (v / s) * 100);
+    }
+    winProbability = { home: +pct[0].toFixed(1), draw: +pct[1].toFixed(1), away: +pct[2].toFixed(1) };
+  }
+  res.json({
+    kickoff: meta?.startTime || null,
+    competition: meta?.competition || null,
+    winProbability,
+    marketsOpen: live ? live.bookFor(id).length : 0,
+  });
+});
+
 // Attack momentum graph — {graphPoints:[{minute,value}], periodTime, periodCount}
 app.get("/api/events/:id/graph", (req, res) => {
   res.json({ graphPoints: momentumMap.get(Number(req.params.id)) || [], periodTime: 45, periodCount: 2 });

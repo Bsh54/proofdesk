@@ -251,7 +251,45 @@ async function selectMatch(id) {
   }
   oddsSeries = [];
   await fetch("/api/live/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fixtureId: id }) });
-  loadIncidents(id); loadGraph(id); loadStats(id); loadMarkets(id);
+  if (e && e.status.type === "notstarted") { renderPregame(e); loadStats(id); loadMarkets(id); }
+  else { loadIncidents(id); loadGraph(id); loadStats(id); loadMarkets(id); }
+}
+
+/* ===== PRE-MATCH view (upcoming games): countdown + market win probability ===== */
+let pregameTimer = null;
+async function renderPregame(e) {
+  let pg = {};
+  try { pg = await (await fetch("/api/events/" + e.id + "/pregame")).json(); } catch {}
+  const box = $("tb-details");
+  const wp = pg.winProbability;
+  const ko = pg.kickoff ? new Date(pg.kickoff) : (e.startTimestamp ? new Date(e.startTimestamp * 1000) : null);
+  const countdown = () => {
+    if (!ko) return "";
+    const d = ko - Date.now();
+    if (d <= 0) return "Kick-off imminent";
+    const h = Math.floor(d / 3600000), m = Math.floor((d % 3600000) / 60000);
+    return (h ? h + "h " : "") + m + "min";
+  };
+  const probBar = wp ? (
+    '<div class="secttl">Win probability — market consensus (demargined)</div>' +
+    '<div style="display:flex;height:26px;border-radius:8px;overflow:hidden;font-size:12px;font-weight:700;color:#fff;text-align:center;line-height:26px">' +
+      '<div style="background:var(--blue);width:' + wp.home + '%">' + (wp.home > 12 ? wp.home + "%" : "") + "</div>" +
+      '<div style="background:#3a4657;width:' + wp.draw + '%">' + (wp.draw > 12 ? wp.draw + "%" : "") + "</div>" +
+      '<div style="background:var(--live);width:' + wp.away + '%">' + (wp.away > 12 ? wp.away + "%" : "") + "</div>" +
+    "</div>" +
+    '<div style="display:flex;justify-content:space-between;color:var(--dim);font-size:12px;margin-top:5px">' +
+      "<span>" + e.homeTeam.name + " " + wp.home + "%</span><span>Draw " + wp.draw + "%</span><span>" + e.awayTeam.name + " " + wp.away + "%</span></div>"
+  ) : '<div class="empty">Market not open yet — win probability will appear when bookmakers open this match (usually 1-2 days before kick-off).</div>';
+  box.innerHTML =
+    '<div style="text-align:center;padding:14px 0 18px">' +
+      '<div style="color:var(--dimmer);font-size:12px;letter-spacing:1px;text-transform:uppercase">Kick-off</div>' +
+      '<div style="font-size:26px;font-weight:800;margin:4px 0" id="koTime">' + (ko ? ko.toLocaleString([], { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—") + "</div>" +
+      '<div style="color:var(--live);font-weight:700" id="koCount">Starts in ' + countdown() + "</div>" +
+    "</div>" + probBar +
+    '<div class="secttl" style="margin-top:16px">Markets open</div>' +
+    '<div style="color:var(--dim)">' + (pg.marketsOpen || 0) + " markets streaming for this match — see the Odds tab.</div>";
+  if (pregameTimer) clearInterval(pregameTimer);
+  pregameTimer = setInterval(() => { const el = $("koCount"); if (el) el.textContent = "Starts in " + countdown(); else clearInterval(pregameTimer); }, 30000);
 }
 
 function setPhase(e) {
@@ -408,7 +446,10 @@ document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
   for (const b of ["details", "stats", "odds"]) $("tb-" + b).style.display = b === t.dataset.t ? "" : "none";
   if (t.dataset.t === "odds") { loadMarkets(selectedId); drawChart(); }
   if (t.dataset.t === "stats") loadStats(selectedId);
-  if (t.dataset.t === "details") { loadGraph(selectedId); }
+  if (t.dataset.t === "details") {
+    const e = eventsCache.find((x) => x.id === selectedId);
+    if (e && e.status.type === "notstarted") renderPregame(e); else loadGraph(selectedId);
+  }
 });
 
 /* LIVE BY DEFAULT */
