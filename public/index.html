@@ -339,24 +339,23 @@ async function renderPregame(e) {
     ssRow("Draws", ss.home.draws, ss.away.draws) +
     ssRow("Goals scored", ss.home.goalsFor, ss.away.goalsFor) +
     ssRow("Goals conceded", ss.home.goalsAgainst, ss.away.goalsAgainst) : "";
+  // kick-off date + countdown live in the hero, above the odds bar
+  const koHero = () => {
+    const ph = $("phase");
+    ph.className = "phase done";
+    ph.innerHTML = (ko ? ko.toLocaleString([], { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—") +
+      ' · <span style="color:var(--live)">Starts in ' + countdown() + "</span>";
+  };
+  koHero();
   box.innerHTML =
-    '<div style="text-align:center;padding:14px 0 18px">' +
-      '<div style="color:var(--dimmer);font-size:12px;letter-spacing:1px;text-transform:uppercase">Kick-off</div>' +
-      '<div style="font-family:var(--display);font-size:28px;font-weight:700;margin:4px 0" id="koTime">' + (ko ? ko.toLocaleString([], { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—") + "</div>" +
-      '<div style="color:var(--live);font-weight:700" id="koCount">Starts in ' + countdown() + "</div>" +
-    "</div>" +
     '<div style="background:var(--card2);border-radius:8px;padding:9px 12px;color:var(--dim);font-size:12.5px;margin-bottom:14px;display:flex;gap:8px;align-items:center">' + SVG.info + ' Live match stats will appear here once the match kicks off.</div>' +
-    '<div class="secttl">Who will win?</div><div id="voteBox" class="mchoices" style="margin-bottom:4px"></div><div id="voteTotal" style="color:var(--dimmer);font-size:11.5px;margin-bottom:10px"></div>' +
     probBar +
     '<div class="secttl" style="margin-top:16px">Team form — tournament matches tracked on this platform</div>' +
     formRow(e.homeTeam.name, pg.homeForm) + formDetail(pg.homeForm) +
     formRow(e.awayTeam.name, pg.awayForm) + formDetail(pg.awayForm) +
-    seasonBlock + movement +
-    '<div class="secttl" style="margin-top:16px">Markets open</div>' +
-    '<div style="color:var(--dim)">' + (pg.marketsOpen || 0) + " markets streaming for this match — see the Odds tab.</div>";
-  renderVotes(e);
+    seasonBlock + movement;
   if (pregameTimer) clearInterval(pregameTimer);
-  pregameTimer = setInterval(() => { const el = $("koCount"); if (el) el.textContent = "Starts in " + countdown(); else clearInterval(pregameTimer); }, 30000);
+  pregameTimer = setInterval(() => { const ev = eventsCache.find((x) => x.id === selectedId); if (ev && ev.status.type === "notstarted" && ev.id === e.id) koHero(); else clearInterval(pregameTimer); }, 30000);
 }
 
 function setPhase(e) {
@@ -375,26 +374,6 @@ function renderState(st) {
   if (changed) { const sb = $("scoreBox"); sb.classList.remove("bump"); void sb.offsetWidth; sb.classList.add("bump"); }
   if (st.minute != null) $("phase").textContent = (st.gameState && st.gameState !== "—" ? st.gameState + " · " : "") + st.minute + "′";
   if (isTab("stats")) renderStatsUI();
-}
-
-/* ===== "Who will win?" — real visitor voting ===== */
-async function renderVotes(e) {
-  let v = { 1: 0, X: 0, 2: 0 };
-  try { v = (await (await fetch("/api/events/" + e.id + "/votes")).json()).vote; } catch {}
-  const total = v["1"] + v["X"] + v["2"];
-  const voted = localStorage.getItem("voted_" + e.id);
-  const pct = (n) => total ? Math.round(n / total * 100) + "%" : "—";
-  const box = $("voteBox");
-  if (!box) return;
-  const pill = (choice, label) =>
-    '<div class="mc" data-v="' + choice + '" role="button" tabindex="0" style="cursor:' + (voted ? "default" : "pointer") + (voted === choice ? ";border-color:var(--green)" : "") + '"><span class="n">' + label + '</span><span class="v">' + pct(v[choice]) + "</span></div>";
-  box.innerHTML = pill("1", flagImg(e.homeTeam.name, 20) || "1") + pill("X", "X") + pill("2", flagImg(e.awayTeam.name, 20) || "2");
-  $("voteTotal").textContent = "Total votes: " + total + (voted ? " · you voted " + voted : " · tap to vote");
-  if (!voted) box.querySelectorAll(".mc").forEach((p) => p.onclick = async () => {
-    localStorage.setItem("voted_" + e.id, p.dataset.v);
-    await fetch("/api/events/" + e.id + "/votes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ choice: p.dataset.v }) });
-    renderVotes(e);
-  });
 }
 
 /* ===== incidents ===== */
