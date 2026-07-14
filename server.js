@@ -376,4 +376,9 @@ wss.on("connection", (ws) => {
   ws.send(JSON.stringify({ kind: "hello", journal: journalRead(50) }));
 });
 
-server.listen(PORT, () => console.log(`ProofDesk listening on :${PORT}`));
+server.listen(PORT, () => {
+  console.log(`ProofDesk listening on :${PORT}`);
+  // SofaScore principle: live is the default state, not an option.
+  ensureLive().start().then(() => console.log("TxLINE live feed: connected at boot"))
+    .catch((e) => console.log("TxLINE live feed unavailable at boot:", e.message));
+});

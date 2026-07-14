@@ -132,7 +132,7 @@
         <span class="chip" id="fLive">Live</span>
       </div>
       <div class="leaguehdr">⚽ FIFA World Cup 2026 · TxLINE feed</div>
-      <div id="matchList"><div class="empty">Press "Go live" to load real fixtures, or use a replay.</div></div>
+      <div id="matchList"><div class="empty">Loading live fixtures…</div></div>
       <div class="leaguehdr">⏪ Replay (recorded / simulated)</div>
       <div class="mrow" id="replayRow">
         <span class="st">SIM</span>
@@ -144,7 +144,6 @@
       <div class="ctrl">
         <label>Seed <input id="seed" type="number" value="42" style="width:60px"></label>
         <label>Speed <select id="speed"><option value="10">×10</option><option value="20" selected>×20</option><option value="60">×60</option></select></label>
-        <button class="primary" id="btnLive">◉ Go live</button>
         <button class="ghost" id="btnVerify">Verify chain</button>
         <div class="vstate" id="verifyState"></div>
       </div>
@@ -237,7 +236,7 @@ function handle(msg) {
 function renderMatchList() {
   const list = filterLive ? fixturesCache.filter((f) => f.inRunning) : fixturesCache;
   const el = $("matchList");
-  if (!list.length) { el.innerHTML = '<div class="empty">' + (fixturesCache.length ? "No live match right now." : 'Press "Go live" to load real fixtures.') + "</div>"; return; }
+  if (!list.length) { el.innerHTML = '<div class="empty">' + (fixturesCache.length ? "No live match right now." : "Waiting for TxLINE fixtures…") + "</div>"; return; }
   el.innerHTML = list.map((f) => {
     const sel = f.fixtureId === selectedFixture ? " sel" : "";
     const st = f.inRunning ? '<span class="st live">LIVE</span>' : '<span class="st">—</span>';
@@ -369,19 +368,22 @@ function drawChart() {
   ctx.fillText(max.toFixed(1), 8, 18); ctx.fillText(min.toFixed(1), 8, h - 18);
 }
 
-/* go live */
-$("btnLive").onclick = async () => {
-  $("btnLive").textContent = "◉ Connecting…";
-  const r = await (await fetch("/api/live/connect", { method: "POST" })).json();
-  if (!r.ok) { $("btnLive").textContent = "◉ Live failed"; return; }
-  $("btnLive").textContent = "◉ Live feed on";
+/* LIVE BY DEFAULT (SofaScore principle) — the server is already connected to
+   TxLINE; the page loads fixtures immediately and auto-selects the live one. */
+async function bootLive() {
+  try { await fetch("/api/live/connect", { method: "POST" }); } catch {}
   const refresh = async () => {
-    fixturesCache = await (await fetch("/api/live/fixtures")).json();
+    try { fixturesCache = await (await fetch("/api/live/fixtures")).json(); } catch { return; }
     renderMatchList();
+    if (selectedFixture == null && fixturesCache.length) {
+      const best = fixturesCache.find((f) => f.inRunning && f.odds) || fixturesCache.find((f) => f.odds);
+      if (best) watchFixture(best.fixtureId);
+    }
   };
   await refresh();
   setInterval(refresh, 6000);
-};
+}
+bootLive();
 
 $("btnVerify").onclick = async () => {
   const r = await (await fetch("/api/journal/verify")).json();
