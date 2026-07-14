@@ -9,6 +9,7 @@ import { createHash, randomUUID } from "crypto";
 import { readFileSync, existsSync, appendFileSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { TxLive } from "./txline-live.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8088;
@@ -246,6 +247,38 @@ function stopReplay() {
 }
 
 // ---------------------------------------------------------------------------
+// 4b. LIVE MODE — real TxLINE data drives the terminal and the agent.
+//     Provenance: every agent decision embeds the TxLINE MessageId + Ts of the
+//     exact odds message that triggered it.
+// ---------------------------------------------------------------------------
+
+let live = null;
+let liveSession = null; // { fixtureId, agent, startTs, match }
+
+function liveMinute(ts) {
+  return Math.max(0, Math.round((ts - liveSession.startTs) / 60000));
+}
+
+function ensureLive() {
+  if (live) return live;
+  live = new TxLive({
+    onStatus: (s) => broadcast({ kind: "live_status", ...s }),
+    onScore: (s) => broadcast({ kind: "live_score", ev: s }),
+    onOdds: (o) => {
+      broadcast({ kind: "live_odds_all", fixtureId: o.fixtureId, odds: { home: o.home, draw: o.draw, away: o.away }, inRunning: o.inRunning });
+      if (!liveSession || o.fixtureId !== liveSession.fixtureId) return;
+      const ev = { type: "odds", minute: liveMinute(o.ts), home: o.home, draw: o.draw, away: o.away, messageId: o.messageId, ts: o.ts };
+      broadcast({ kind: "event", ev });
+      const s = liveSession;
+      const decisions = agentOnTick(s, ev);
+      for (const d of decisions) broadcast({ kind: "decision", ...d });
+      broadcast({ kind: "agent", agent: { bankroll: s.agent.bankroll, open: s.agent.openPositions, closed: s.agent.closedPositions } });
+    },
+  });
+  return live;
+}
+
+// ---------------------------------------------------------------------------
 // 5. HTTP + WS
 // ---------------------------------------------------------------------------
 
@@ -259,6 +292,28 @@ app.post("/api/replay/start", (req, res) => {
   res.json({ ok: true, session: s.id, match: `${s.match.home} vs ${s.match.away}` });
 });
 app.post("/api/replay/stop", (_req, res) => { stopReplay(); res.json({ ok: true }); });
+
+// --- LIVE mode ---
+app.post("/api/live/connect", async (_req, res) => {
+  try { await ensureLive().start(); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.get("/api/live/fixtures", (_req, res) => res.json(live ? live.listFixtures() : []));
+app.post("/api/live/watch", (req, res) => {
+  const { fixtureId } = req.body || {};
+  if (!fixtureId) return res.status(400).json({ ok: false, error: "fixtureId required" });
+  stopReplay();
+  liveSession = {
+    fixtureId: Number(fixtureId),
+    agent: makeAgentState(),
+    startTs: Date.now(),
+    match: { seed: `live-${fixtureId}`, home: `HOME #${fixtureId}`, away: `AWAY #${fixtureId}` },
+  };
+  journalAppend({ kind: "session_start", mode: "LIVE", fixtureId: Number(fixtureId), source: "TxLINE" });
+  broadcast({ kind: "session", match: { home: liveSession.match.home, away: liveSession.match.away, seed: "LIVE" }, agent: liveSession.agent });
+  res.json({ ok: true, fixtureId: Number(fixtureId) });
+});
+app.post("/api/live/stop", (_req, res) => { liveSession = null; if (live) live.stop(); live = null; res.json({ ok: true }); });
 app.get("/api/journal", (_req, res) => res.json(journalRead()));
 app.get("/api/journal/verify", (_req, res) => res.json(journalVerify()));
 app.get("/api/health", (_req, res) => res.json({ ok: true, service: "proofdesk", uptime: process.uptime() }));

@@ -109,6 +109,8 @@
   <label>Seed <input id="seed" type="number" value="42" style="width:70px"></label>
   <label>Speed <select id="speed"><option value="10">x10</option><option value="20" selected>x20</option><option value="60">x60</option></select></label>
   <button id="btnStart">▶ REPLAY MATCH</button>
+  <button id="btnLive" style="background:var(--amber);color:#3a2a05">◉ GO LIVE (TxLINE)</button>
+  <select id="liveFixtures" style="display:none;max-width:220px"></select>
   <button class="secondary" id="btnVerify">VERIFY CHAIN</button>
   <span id="verifyState"></span>
   <div id="bankroll">$1000.00</div>
@@ -138,6 +140,8 @@ function handle(msg) {
   if (msg.kind === "journal") renderJournal(msg.entry);
   if (msg.kind === "agent") renderAgent(msg.agent);
   if (msg.kind === "session_end") addFeed("FT", "— FULL TIME — session settled", "goal");
+  if (msg.kind === "live_status") { $("connTxt").textContent = "TxLINE " + msg.state; }
+  if (msg.kind === "live_score" && msg.ev.fixtureId) addFeed("•", "score update #" + msg.ev.fixtureId, "var");
 }
 
 function renderEvent(ev) {
@@ -217,6 +221,32 @@ function drawChart() {
 $("btnStart").onclick = () =>
   fetch("/api/replay/start", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ seed: +$("seed").value, speed: +$("speed").value }) });
+
+// --- LIVE mode ---
+let liveFixturePoll = null;
+$("btnLive").onclick = async () => {
+  $("btnLive").textContent = "◉ CONNECTING…";
+  const r = await (await fetch("/api/live/connect", { method: "POST" })).json();
+  if (!r.ok) { $("btnLive").textContent = "◉ LIVE FAILED"; return; }
+  $("btnLive").textContent = "◉ LIVE — pick a match:";
+  $("liveFixtures").style.display = "inline-block";
+  const refresh = async () => {
+    const list = await (await fetch("/api/live/fixtures")).json();
+    const sel = $("liveFixtures");
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— live fixtures (' + list.length + ") —</option>" +
+      list.filter((f) => f.odds).map((f) =>
+        '<option value="' + f.fixtureId + '">#' + f.fixtureId + (f.inRunning ? " ⚽LIVE " : " ") +
+        (f.odds ? f.odds.home.toFixed(2) + "/" + f.odds.draw.toFixed(2) + "/" + f.odds.away.toFixed(2) : "") + "</option>").join("");
+    if (cur) sel.value = cur;
+  };
+  await refresh();
+  liveFixturePoll = setInterval(refresh, 5000);
+};
+$("liveFixtures").onchange = async (e) => {
+  if (!e.target.value) return;
+  await fetch("/api/live/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fixtureId: +e.target.value }) });
+};
 
 $("btnVerify").onclick = async () => {
   const r = await (await fetch("/api/journal/verify")).json();
