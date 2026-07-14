@@ -503,9 +503,36 @@ app.get("/api/events/:id/statistics", (req, res) => {
   res.json({ statistics });
 });
 
+// "Who will win?" — real visitor votes, persisted server-side.
+const VOTES_FILE = join(DATA_DIR, "votes.json");
+let votes = {};
+try { votes = JSON.parse(readFileSync(VOTES_FILE, "utf8")); } catch {}
+app.get("/api/events/:id/votes", (req, res) => res.json({ vote: votes[req.params.id] || { 1: 0, X: 0, 2: 0 } }));
+app.post("/api/events/:id/votes", (req, res) => {
+  const c = String(req.body?.choice || "");
+  if (!["1", "X", "2"].includes(c)) return res.status(400).json({ ok: false });
+  const v = (votes[req.params.id] = votes[req.params.id] || { 1: 0, X: 0, 2: 0 });
+  v[c]++;
+  try { writeFileSync(VOTES_FILE, JSON.stringify(votes)); } catch {}
+  res.json({ ok: true, vote: v });
+});
+
+// Season statistics per team, aggregated from OUR tracked archive.
+function seasonStats(teamName) {
+  const form = teamFormAll(teamName);
+  const s = { matches: form.length, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0 };
+  for (const f of form) {
+    if (f.result === "W") s.wins++; else if (f.result === "L") s.losses++; else s.draws++;
+    const [gh, ga] = f.score.split("-").map(Number);
+    s.goalsFor += f.home ? gh : ga;
+    s.goalsAgainst += f.home ? ga : gh;
+  }
+  return s;
+}
+
 // Team form built from OUR observed archive: every finished fixture this
 // platform has tracked contributes a W/D/L entry for both teams.
-function teamForm(teamName, excludeId) {
+function teamFormAll(teamName, excludeId) {
   if (!live || !teamName) return [];
   const out = [];
   for (const fid of live.allFixtureIds()) {
@@ -527,8 +554,9 @@ function teamForm(teamName, excludeId) {
       startTime: meta.startTime, competition: meta.competition,
     });
   }
-  return out.sort((a, b) => b.startTime - a.startTime).slice(0, 5);
+  return out.sort((a, b) => b.startTime - a.startTime);
 }
+const teamForm = (teamName, excludeId) => teamFormAll(teamName, excludeId).slice(0, 5);
 
 // Pre-game endpoint — market-implied win probability (demargined consensus),
 // same display concept as the "who will win" bar, but based on real prices.
@@ -555,6 +583,7 @@ app.get("/api/events/:id/pregame", (req, res) => {
     oddsMovement: opening && odds ? { opening: { home: opening.home, draw: opening.draw, away: opening.away }, current: { home: odds.home, draw: odds.draw, away: odds.away } } : null,
     homeForm: teamForm(meta?.home, id),
     awayForm: teamForm(meta?.away, id),
+    seasonStats: { home: seasonStats(meta?.home), away: seasonStats(meta?.away) },
   });
 });
 
