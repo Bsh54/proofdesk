@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ProofDesk — Live Football</title>
 <style>
-  /* SofaScore UX principles: live-first, list is king, red = live, data-first */
+  /* Design principles: live-first, list is king, red = live, data-first */
   :root {
     --bg: #0e1319; --card: #161d26; --card2: #1c242f; --line: #242e3b;
     --text: #eef2f6; --dim: #8a95a3; --dimmer: #566171;
@@ -162,10 +162,11 @@ function handle(msg) {
   }
   if (msg.kind === "event") renderEvent(msg.ev);
   if (msg.kind === "match_state") renderState(msg.state);
+  if (msg.kind === "incident" && msg.fixtureId === selectedId) prependIncident(msg.incident);
   if (msg.kind === "live_odds_all") refreshList(); /* keep list fresh on odds moves */
 }
 
-/* ===== the list (SofaScore's king screen) ===== */
+/* ===== the match list (primary screen) ===== */
 let listTimer = null;
 async function refreshList() {
   let body;
@@ -209,6 +210,35 @@ async function selectMatch(id) {
     if (e.odds) { $("o1").textContent = e.odds.home.toFixed(2); $("oX").textContent = e.odds.draw.toFixed(2); $("o2").textContent = e.odds.away.toFixed(2); }
   }
   await fetch("/api/live/watch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fixtureId: id }) });
+  loadIncidents(id);
+}
+
+/* ===== incidents (/api/events/{id}/incidents) ===== */
+async function loadIncidents(id) {
+  let body;
+  try { body = await (await fetch("/api/events/" + id + "/incidents")).json(); } catch { return; }
+  const f = $("tb-details");
+  f.innerHTML = "";
+  const incs = body.incidents || [];
+  if (!incs.length) { f.innerHTML = '<div class="empty">No incidents yet — goals, cards and periods will appear here in real time.</div>'; return; }
+  incs.forEach((inc) => prependIncident(inc));
+}
+
+function prependIncident(inc) {
+  const f = $("tb-details");
+  if (f.querySelector(".empty")) f.innerHTML = "";
+  const side = inc.isHome === undefined ? "" : inc.isHome ? $("nmHome").textContent : $("nmAway").textContent;
+  let ico = "•", cls = "", txt = "";
+  if (inc.incidentType === "goal") { ico = "⚽"; cls = "goal"; txt = "Goal — " + side + "  " + inc.homeScore + " - " + inc.awayScore; }
+  else if (inc.incidentType === "card") { ico = inc.cardColor === "red" ? "🟥" : "🟨"; txt = (inc.cardColor === "red" ? "Red" : "Yellow") + " card — " + side; }
+  else if (inc.incidentType === "varDecision") { ico = "📺"; txt = (inc.text || "VAR decision") + "  " + inc.homeScore + " - " + inc.awayScore; }
+  else if (inc.incidentType === "period") { ico = "⏱"; txt = inc.text + (inc.homeScore != null ? "  " + inc.homeScore + " - " + inc.awayScore : ""); }
+  else return;
+  const d = document.createElement("div");
+  d.className = "tl " + cls;
+  d.innerHTML = '<span class="m">' + (inc.time != null ? inc.time + "′" : "—") + '</span><span class="ico">' + ico + '</span><span class="t">' + txt + "</span>";
+  f.prepend(d);
+  while (f.children.length > 80) f.lastChild.remove();
 }
 
 function setPhase(e) {
@@ -252,28 +282,7 @@ function renderEvent(ev) {
     if (!isNaN(prev) && ev[k] !== prev) { p.classList.add(ev[k] > prev ? "up" : "down", "flash"); setTimeout(() => p.classList.remove("flash"), 500); }
   }
   oddsSeries.push(ev);
-  addOddsIncident(ev);
   drawChart();
-}
-
-/* incidents from odds swings (until granular score incidents arrive) */
-let lastLogged = null;
-function addOddsIncident(ev) {
-  if (!lastLogged) { lastLogged = ev; return; }
-  for (const [k, label] of [["home", "1"], ["draw", "X"], ["away", "2"]]) {
-    const delta = (ev[k] - lastLogged[k]) / lastLogged[k];
-    if (Math.abs(delta) >= 0.08) {
-      const d = document.createElement("div");
-      d.className = "tl";
-      d.innerHTML = '<span class="m">' + new Date(ev.ts || Date.now()).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + '</span><span class="ico">' + (delta < 0 ? "📉" : "📈") + '</span><span class="t">Odds ' + label + " " + (delta < 0 ? "dropping" : "rising") + ": " + lastLogged[k].toFixed(2) + " → " + ev[k].toFixed(2) + "</span>";
-      const f = $("tb-details");
-      if (f.querySelector(".empty")) f.innerHTML = "";
-      f.prepend(d);
-      while (f.children.length > 60) f.lastChild.remove();
-      lastLogged = ev;
-      return;
-    }
-  }
 }
 
 /* tabs */

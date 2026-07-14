@@ -248,7 +248,7 @@ function stopReplay() {
 }
 
 // ---------------------------------------------------------------------------
-// 4a-bis. MATCH STATE — SofaScore-style aggregated state (score, stats, clock)
+// 4a-bis. MATCH STATE — Aggregated live match state (score, stats, clock)
 // ---------------------------------------------------------------------------
 
 function blankMatchState() {
@@ -291,8 +291,39 @@ let live = null;
 let liveSession = null; // { fixtureId, agent, startTs, match }
 const scoreStates = new Map(); // fixtureId -> decoded match state (all fixtures)
 
-// SofaScore game-state mapping (TxLINE StatusId -> status object)
+// Game-state mapping (TxLINE StatusId -> status object)
 const PHASES = { 1: "Not started", 2: "1st half", 3: "Halftime", 4: "2nd half", 5: "ET 1st", 6: "ET break", 7: "ET 2nd", 8: "Penalties", 10: "Finished", 19: "Postponed" };
+
+// ---------------------------------------------------------------------------
+// INCIDENTS — Event-centric model: each match owns an incidents list
+// (goal / card / period), built by diffing consecutive score states.
+// ---------------------------------------------------------------------------
+const incidentsMap = new Map(); // fixtureId -> [{time, incidentType, ...}]
+
+function pushIncident(fixtureId, inc) {
+  const arr = incidentsMap.get(fixtureId) || [];
+  arr.push(inc);
+  if (arr.length > 200) arr.shift();
+  incidentsMap.set(fixtureId, arr);
+  broadcast({ kind: "incident", fixtureId, incident: inc });
+}
+
+function detectIncidents(fixtureId, prev, st, m) {
+  const t = st.minute ?? null;
+  for (const side of [0, 1]) {
+    const isHome = side === 0;
+    if (st.score[side] > prev.score[side])
+      pushIncident(fixtureId, { time: t, incidentType: "goal", isHome, homeScore: st.score[0], awayScore: st.score[1] });
+    if (st.score[side] < prev.score[side]) // VAR overturned
+      pushIncident(fixtureId, { time: t, incidentType: "varDecision", isHome, text: "Goal overturned", homeScore: st.score[0], awayScore: st.score[1] });
+    if (st.yellow[side] > prev.yellow[side])
+      pushIncident(fixtureId, { time: t, incidentType: "card", cardColor: "yellow", isHome });
+    if (st.red[side] > prev.red[side])
+      pushIncident(fixtureId, { time: t, incidentType: "card", cardColor: "red", isHome });
+  }
+  if (st.statusId !== prev.statusId && PHASES[st.statusId])
+    pushIncident(fixtureId, { time: t, incidentType: "period", text: PHASES[st.statusId], homeScore: st.score[0], awayScore: st.score[1] });
+}
 
 function liveMinute(ts) {
   return Math.max(0, Math.round((ts - liveSession.startTs) / 60000));
@@ -305,8 +336,9 @@ function ensureLive() {
     onScore: (s) => {
       const m = s.raw;
       if (!m || !m.FixtureId) return;
-      // Track state for EVERY fixture (SofaScore event model), not only the watched one.
+      // Track state for EVERY fixture (event-centric model), not only the watched one.
       const st = scoreStates.get(m.FixtureId) || blankMatchState();
+      const prev = { score: [...st.score], yellow: [...st.yellow], red: [...st.red], statusId: st.statusId };
       if (m.Clock?.Seconds != null) st.minute = Math.floor(m.Clock.Seconds / 60);
       if (m.GameState) st.gameState = m.GameState;
       if (m.StatusId != null) st.statusId = m.StatusId;
@@ -316,6 +348,7 @@ function ensureLive() {
         st.score = d.score; st.yellow = d.yellow; st.red = d.red; st.corners = d.corners;
       }
       scoreStates.set(m.FixtureId, st);
+      detectIncidents(m.FixtureId, prev, st, m);
       if (liveSession && m.FixtureId === liveSession.fixtureId) {
         liveSession.state = st;
         broadcast({ kind: "match_state", state: st });
@@ -350,13 +383,13 @@ app.post("/api/replay/start", (req, res) => {
 });
 app.post("/api/replay/stop", (_req, res) => { stopReplay(); res.json({ ok: true }); });
 
-// --- SofaScore-shaped events API (our data, their JSON design) ---
+// --- Events API (event-centric JSON model) ---
 app.get("/api/events/live", (_req, res) => {
   const fixtures = live ? live.listFixtures() : [];
   const events = fixtures.map((f) => {
     const meta = live.metaFor(f.fixtureId);
     const st = scoreStates.get(f.fixtureId);
-    const inplay = f.inRunning || (st && st.gameState && !["Finished", "Not started", "scheduled"].includes(st.gameState));
+    const inplay = f.inRunning || (st && [2, 3, 4, 5, 6, 7, 8].includes(st.statusId));
     return {
       id: f.fixtureId,
       tournament: { name: meta?.competition || "FIFA World Cup 2026", category: { name: "World", sport: { name: "Football" } } },
@@ -375,6 +408,11 @@ app.get("/api/events/live", (_req, res) => {
     };
   });
   res.json({ events });
+});
+
+// Incidents endpoint (per-event incident list)
+app.get("/api/events/:id/incidents", (req, res) => {
+  res.json({ incidents: incidentsMap.get(Number(req.params.id)) || [] });
 });
 
 // --- LIVE mode ---
@@ -416,7 +454,7 @@ wss.on("connection", (ws) => {
 
 server.listen(PORT, () => {
   console.log(`ProofDesk listening on :${PORT}`);
-  // SofaScore principle: live is the default state, not an option.
+  // Live is the default state, not an option.
   ensureLive().start().then(() => console.log("TxLINE live feed: connected at boot"))
     .catch((e) => console.log("TxLINE live feed unavailable at boot:", e.message));
 });
