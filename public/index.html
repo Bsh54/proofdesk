@@ -45,6 +45,8 @@
   .mrow .scs { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
   .mrow .scs.live { color: var(--live); }
   .empty { padding: 18px 14px; color: var(--dimmer); font-size: 13px; }
+  .oddsmini { display: flex; gap: 4px; }
+  .omini { background: var(--card2); border-radius: 5px; padding: 3px 6px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--dim); min-width: 36px; text-align: center; }
 
   /* ===== RIGHT: match detail ===== */
   .crumb { color: var(--dimmer); font-size: 12px; padding: 14px 16px 0; }
@@ -173,11 +175,13 @@ const $ = (id) => document.getElementById(id);
 let ws, oddsSeries = [], eventsCache = [], selectedId = null, filterLive = false;
 let statsData = [], statsPeriod = "ALL";
 
-/* national team name -> flag emoji */
-const FLAGS = { France:"🇫🇷", Spain:"🇪🇸", England:"🏴󠁧󠁢󠁥󠁮󠁧󠁿", Argentina:"🇦🇷", Brazil:"🇧🇷", Germany:"🇩🇪", Portugal:"🇵🇹", Netherlands:"🇳🇱", Italy:"🇮🇹", Belgium:"🇧🇪", Croatia:"🇭🇷", Morocco:"🇲🇦", Japan:"🇯🇵", USA:"🇺🇸", "United States":"🇺🇸", Mexico:"🇲🇽", Canada:"🇨🇦", Uruguay:"🇺🇾", Colombia:"🇨🇴", Senegal:"🇸🇳", Ghana:"🇬🇭", Nigeria:"🇳🇬", Cameroon:"🇨🇲", Australia:"🇦🇺", "South Korea":"🇰🇷", Korea:"🇰🇷", "Saudi Arabia":"🇸🇦", Qatar:"🇶🇦", Iran:"🇮🇷", Switzerland:"🇨🇭", Poland:"🇵🇱", Denmark:"🇩🇰", Sweden:"🇸🇪", Norway:"🇳🇴", Austria:"🇦🇹", Ukraine:"🇺🇦", Serbia:"🇷🇸", Turkey:"🇹🇷", Vietnam:"🇻🇳", Myanmar:"🇲🇲", Ecuador:"🇪🇨", Peru:"🇵🇪", Chile:"🇨🇱", Paraguay:"🇵🇾", Wales:"🏴󠁧󠁢󠁷󠁬󠁳󠁿", Scotland:"🏴󠁧󠁢󠁳󠁣󠁴󠁿", Ireland:"🇮🇪", "Czech Republic":"🇨🇿", Czechia:"🇨🇿", Slovakia:"🇸🇰", Slovenia:"🇸🇮", Hungary:"🇭🇺", Romania:"🇷🇴", Greece:"🇬🇷", Egypt:"🇪🇬", Algeria:"🇩🇿", Tunisia:"🇹🇳", "Ivory Coast":"🇨🇮", "Costa Rica":"🇨🇷", Panama:"🇵🇦", Honduras:"🇭🇳", Jamaica:"🇯🇲", "New Zealand":"🇳🇿", China:"🇨🇳", India:"🇮🇳", Thailand:"🇹🇭", Indonesia:"🇮🇩", Malaysia:"🇲🇾", Uzbekistan:"🇺🇿", Jordan:"🇯🇴", Iraq:"🇮🇶" };
-const flag = (n) => FLAGS[n] || null;
+/* national team name -> ISO country code, rendered as CDN flag images
+   (emoji flags do not render on Windows — images work everywhere) */
+const ISO = { France:"fr", Spain:"es", England:"gb-eng", Argentina:"ar", Brazil:"br", Germany:"de", Portugal:"pt", Netherlands:"nl", Italy:"it", Belgium:"be", Croatia:"hr", Morocco:"ma", Japan:"jp", USA:"us", "United States":"us", Mexico:"mx", Canada:"ca", Uruguay:"uy", Colombia:"co", Senegal:"sn", Ghana:"gh", Nigeria:"ng", Cameroon:"cm", Australia:"au", "South Korea":"kr", "Korea Republic":"kr", Korea:"kr", "Saudi Arabia":"sa", Qatar:"qa", Iran:"ir", Switzerland:"ch", Poland:"pl", Denmark:"dk", Sweden:"se", Norway:"no", Austria:"at", Ukraine:"ua", Serbia:"rs", Turkey:"tr", Türkiye:"tr", Vietnam:"vn", Myanmar:"mm", Ecuador:"ec", Peru:"pe", Chile:"cl", Paraguay:"py", Bolivia:"bo", Venezuela:"ve", Wales:"gb-wls", Scotland:"gb-sct", "Northern Ireland":"gb-nir", Ireland:"ie", "Republic of Ireland":"ie", "Czech Republic":"cz", Czechia:"cz", Slovakia:"sk", Slovenia:"si", Hungary:"hu", Romania:"ro", Bulgaria:"bg", Greece:"gr", Egypt:"eg", Algeria:"dz", Tunisia:"tn", Libya:"ly", "Ivory Coast":"ci", "Cote d'Ivoire":"ci", Mali:"ml", "Burkina Faso":"bf", "South Africa":"za", "DR Congo":"cd", "Congo DR":"cd", Guinea:"gn", "Cape Verde":"cv", Gabon:"ga", Togo:"tg", Benin:"bj", Zambia:"zm", Zimbabwe:"zw", Kenya:"ke", Ethiopia:"et", Sudan:"sd", Angola:"ao", Mozambique:"mz", "Costa Rica":"cr", Panama:"pa", Honduras:"hn", "El Salvador":"sv", Guatemala:"gt", Jamaica:"jm", Haiti:"ht", "Trinidad and Tobago":"tt", "New Zealand":"nz", Fiji:"fj", China:"cn", "China PR":"cn", India:"in", Thailand:"th", Indonesia:"id", Malaysia:"my", Singapore:"sg", Philippines:"ph", Uzbekistan:"uz", Jordan:"jo", Iraq:"iq", Syria:"sy", Lebanon:"lb", Oman:"om", Bahrain:"bh", Kuwait:"kw", UAE:"ae", "United Arab Emirates":"ae", Israel:"il", Palestine:"ps", Russia:"ru", Belarus:"by", Georgia:"ge", Armenia:"am", Azerbaijan:"az", Kazakhstan:"kz", Finland:"fi", Iceland:"is", Estonia:"ee", Latvia:"lv", Lithuania:"lt", Albania:"al", "North Macedonia":"mk", Macedonia:"mk", Kosovo:"xk", Montenegro:"me", "Bosnia and Herzegovina":"ba", Bosnia:"ba", Moldova:"md", Cyprus:"cy", Malta:"mt", Luxembourg:"lu", "Faroe Islands":"fo", Andorra:"ad", "San Marino":"sm", Gibraltar:"gi", Liechtenstein:"li" };
+const isoOf = (n) => ISO[n] || ISO[String(n).replace(/ U\d+$/, "")] || null;
+const flagImg = (n, size) => { const c = isoOf(n); return c ? '<img src="https://flagcdn.com/w' + size + '/' + c + '.png" alt="" style="border-radius:3px;vertical-align:-2px" width="' + (size / 2) + '">' : ""; };
 const initials = (n) => String(n).split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 3).toUpperCase();
-const teamGlyph = (n) => flag(n) || initials(n);
+const teamGlyphHTML = (n) => { const c = isoOf(n); return c ? '<img src="https://flagcdn.com/w80/' + c + '.png" alt="" style="width:40px;border-radius:4px">' : initials(n); };
 
 function connect() {
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
@@ -221,10 +225,12 @@ function renderList() {
       const st = liveM ? '<span class="st live">' + (e.time.minute != null ? e.time.minute + "′" : "LIVE") + "</span>"
         : e.status.type === "finished" ? '<span class="st">FT</span>'
         : '<span class="st">' + (e.startTimestamp ? new Date(e.startTimestamp * 1000).toLocaleDateString([], { day: "2-digit", month: "2-digit" }) + "<br>" + new Date(e.startTimestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—") + "</span>";
-      const fh = flag(e.homeTeam.name), fa = flag(e.awayTeam.name);
+      const fh = flagImg(e.homeTeam.name, 20), fa = flagImg(e.awayTeam.name, 20);
+      const right = (e.status.type === "notstarted" && e.odds)
+        ? '<span class="oddsmini"><span class="omini">' + e.odds.home.toFixed(2) + '</span><span class="omini">' + e.odds.draw.toFixed(2) + '</span><span class="omini">' + e.odds.away.toFixed(2) + "</span></span>"
+        : '<span class="scs' + (liveM ? " live" : "") + '"><span>' + e.homeScore.display + "</span><span>" + e.awayScore.display + "</span></span>";
       return '<div class="mrow' + sel + '" data-id="' + e.id + '">' + st +
-        '<span class="tms"><span>' + (fh ? fh + " " : "") + e.homeTeam.name + "</span><span>" + (fa ? fa + " " : "") + e.awayTeam.name + "</span></span>" +
-        '<span class="scs' + (liveM ? " live" : "") + '"><span>' + e.homeScore.display + "</span><span>" + e.awayScore.display + "</span></span></div>";
+        '<span class="tms"><span>' + (fh ? fh + " " : "") + e.homeTeam.name + "</span><span>" + (fa ? fa + " " : "") + e.awayTeam.name + "</span></span>" + right + "</div>";
     }).join("")
   ).join("");
   el.querySelectorAll(".mrow").forEach((r) => r.onclick = () => selectMatch(+r.dataset.id));
@@ -237,7 +243,7 @@ async function selectMatch(id) {
   if (e) {
     $("crumb").textContent = e.tournament.name + (e.startTimestamp ? " · " + new Date(e.startTimestamp * 1000).toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
     $("nmHome").textContent = e.homeTeam.name; $("nmAway").textContent = e.awayTeam.name;
-    $("avHome").textContent = teamGlyph(e.homeTeam.name); $("avAway").textContent = teamGlyph(e.awayTeam.name);
+    $("avHome").innerHTML = teamGlyphHTML(e.homeTeam.name); $("avAway").innerHTML = teamGlyphHTML(e.awayTeam.name);
     $("scH").textContent = e.homeScore.display; $("scA").textContent = e.awayScore.display;
     setPhase(e);
     if (e.odds) { $("o1").textContent = e.odds.home.toFixed(2); $("oX").textContent = e.odds.draw.toFixed(2); $("o2").textContent = e.odds.away.toFixed(2); }
