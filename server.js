@@ -10,6 +10,7 @@ import { readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync } fr
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { TxLive } from "./txline-live.mjs";
+import { createAgent, DEFAULT_CONFIG as AGENT_DEFAULTS } from "./agent.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8088;
@@ -139,6 +140,42 @@ function journalVerify() {
   }
   return { ok: true, count: entries.length, head: prev };
 }
+
+// ---------------------------------------------------------------------------
+// 2-bis. LIVE AUTONOMOUS AGENT — the production trading agent. Runs on the
+// full TxLINE stream (every fixture), journals every decision through the
+// hash chain, persists its book across restarts, needs no human input.
+// ---------------------------------------------------------------------------
+
+const AGENT_STATE_FILE = join(DATA_DIR, "agent-state.json");
+const AGENT_CONFIG_FILE = join(DATA_DIR, "agent-config.json");
+const agentConfig = existsSync(AGENT_CONFIG_FILE)
+  ? { ...AGENT_DEFAULTS, ...JSON.parse(readFileSync(AGENT_CONFIG_FILE, "utf8")) }
+  : AGENT_DEFAULTS;
+
+const liveAgent = createAgent(agentConfig, {
+  journal: (r) => journalAppend({ ...r, source: "live-agent" }),
+  emit: (m) => broadcast(m),
+});
+
+// restore the persisted book (bankroll, settled trades, equity curve)
+if (existsSync(AGENT_STATE_FILE)) {
+  try {
+    const saved = JSON.parse(readFileSync(AGENT_STATE_FILE, "utf8"));
+    liveAgent.state.bankroll = saved.bankroll ?? liveAgent.state.bankroll;
+    liveAgent.state.closed = saved.closed || [];
+    liveAgent.state.equity = saved.equity || liveAgent.state.equity;
+    liveAgent.state.halted = saved.halted || false;
+  } catch {}
+}
+setInterval(() => {
+  try {
+    writeFileSync(AGENT_STATE_FILE, JSON.stringify({
+      bankroll: liveAgent.state.bankroll, closed: liveAgent.state.closed,
+      equity: liveAgent.state.equity, halted: liveAgent.state.halted, savedAt: Date.now(),
+    }));
+  } catch {}
+}, 30_000);
 
 // ---------------------------------------------------------------------------
 // 3. RULE-BASED AGENT ("le trader") — paper-trading book.
@@ -370,6 +407,16 @@ function ensureLive() {
       updateMomentum(m.FixtureId, st, m);
       scoreStates.set(m.FixtureId, st);
       detectIncidents(m.FixtureId, prev, st, m);
+      // agent: in-play event triggers + settlement on final whistle
+      const tsNow = m.Ts || Date.now();
+      const side0 = st.score[0] > prev.score[0], side1 = st.score[1] > prev.score[1];
+      if (side0 || side1) liveAgent.onIncident(m.FixtureId, { kind: "goal", isHome: side0, ts: tsNow, score: [...st.score] });
+      if (st.red[0] > prev.red[0]) liveAgent.onIncident(m.FixtureId, { kind: "red", isHome: true, ts: tsNow, score: [...st.score] });
+      if (st.red[1] > prev.red[1]) liveAgent.onIncident(m.FixtureId, { kind: "red", isHome: false, ts: tsNow, score: [...st.score] });
+      if (st.statusId === 10 && prev.statusId !== 10) {
+        const [h, a] = st.score;
+        liveAgent.onFinal(m.FixtureId, { winner: h > a ? "home" : a > h ? "away" : "draw", finalScore: `${h}-${a}`, ts: tsNow });
+      }
       if (liveSession && m.FixtureId === liveSession.fixtureId) {
         liveSession.state = st;
         broadcast({ kind: "match_state", state: st });
@@ -377,6 +424,12 @@ function ensureLive() {
     },
     onOdds: (o) => {
       broadcast({ kind: "live_odds_all", fixtureId: o.fixtureId, odds: { home: o.home, draw: o.draw, away: o.away }, inRunning: o.inRunning });
+      // agent watches EVERY fixture on the stream, autonomously
+      liveAgent.onOdds({
+        fixtureId: o.fixtureId, ts: o.ts || Date.now(),
+        odds: { home: o.home, draw: o.draw, away: o.away },
+        pct: o.pct, inRunning: o.inRunning, meta: live ? live.metaFor(o.fixtureId) : null,
+      });
       if (!liveSession || o.fixtureId !== liveSession.fixtureId) return;
       const ev = { type: "odds", minute: liveMinute(o.ts), home: o.home, draw: o.draw, away: o.away, messageId: o.messageId, ts: o.ts };
       broadcast({ kind: "event", ev });
@@ -636,6 +689,18 @@ app.post("/api/live/watch", (req, res) => {
   res.json({ ok: true, fixtureId: Number(fixtureId) });
 });
 app.post("/api/live/stop", (_req, res) => { liveSession = null; if (live) live.stop(); live = null; res.json({ ok: true }); });
+// ---- live autonomous agent ----
+app.get("/api/agent", (_req, res) => res.json(liveAgent.snapshot()));
+app.get("/api/agent/backtest", (_req, res) => {
+  const f = join(DATA_DIR, "backtest-report.json");
+  if (!existsSync(f)) return res.json({ ready: false });
+  res.json({ ready: true, ...JSON.parse(readFileSync(f, "utf8")) });
+});
+app.get("/api/agent/calibration", (_req, res) => {
+  const f = join(DATA_DIR, "calibration.json");
+  if (!existsSync(f)) return res.json({ ready: false });
+  res.json({ ready: true, ...JSON.parse(readFileSync(f, "utf8")) });
+});
 app.get("/api/journal", (_req, res) => res.json(journalRead()));
 app.get("/api/journal/verify", (_req, res) => res.json(journalVerify()));
 app.get("/api/health", (_req, res) => res.json({ ok: true, service: "proofdesk", uptime: process.uptime() }));

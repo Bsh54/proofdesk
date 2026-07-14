@@ -135,6 +135,32 @@
   .mc .arr.up { color: var(--red); } .mc .arr.dn { color: var(--green); }
   canvas.oddshist { width: 100%; height: 220px; }
 
+  /* ===== TRADING DESK ===== */
+  nav { display: flex; gap: 8px; }
+  nav .sport.nav-off { background: transparent; color: var(--dim); }
+  nav .sport.nav-off:hover { color: var(--text); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--gap); padding: var(--pad); }
+  .kpi { background: var(--card2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .kpi .l { font-size: 11px; color: var(--dimmer); text-transform: uppercase; letter-spacing: .6px; }
+  .kpi .v { font-family: var(--display); font-size: var(--fs-xl); font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .kpi .v.pos { color: var(--green); } .kpi .v.neg { color: var(--red); }
+  .kpi .s { font-size: 11px; color: var(--dimmer); }
+  .deskgrid { display: grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1fr); gap: var(--pad); padding: 0 var(--pad) var(--pad); align-items: start; }
+  @media (max-width: 860px) { .deskgrid { grid-template-columns: 1fr; } }
+  .panel { background: var(--card2); border: 1px solid var(--line); border-radius: 8px; padding: var(--pad); }
+  .panel h3 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--dimmer); margin-bottom: 8px; }
+  #equity { width: 100%; height: 150px; display: block; }
+  .trow { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-sm); }
+  .trow .meta { color: var(--dimmer); font-size: 11.5px; margin-top: 2px; }
+  .trow .pnl { font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+  .trow .pnl.pos { color: var(--green); } .trow .pnl.neg { color: var(--red); }
+  .rulebadge { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 10px; font-weight: 700; letter-spacing: .4px; background: rgba(59,130,246,.15); color: var(--blue); margin-right: 6px; }
+  .hashchip { font-family: var(--mono); font-size: 10px; color: var(--dimmer); }
+  table.bt { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+  table.bt th { text-align: left; color: var(--dimmer); font-weight: 600; padding: 5px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--card2); }
+  table.bt td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  table.bt td.pos { color: var(--green); } table.bt td.neg { color: var(--red); }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; }
     html { scroll-behavior: auto; }
@@ -144,7 +170,10 @@
 <body>
 <header>
   <div class="logo">Proof<span>Desk</span></div>
-  <nav><span class="sport"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2.6 2.4 1.7-.9 2.8h-3l-.9-2.8L12 4.6zM5.2 9.5l2.8.9.9 2.8-1.7 2.4-2.9-1a8 8 0 0 1 .9-5.1zm3.6 9.9 1-2.9h4.4l1 2.9a8 8 0 0 1-6.4 0zm10-.8-2.9 1-1.7-2.4.9-2.8 2.8-.9 1.8 2.4a8 8 0 0 1-.9 2.7z"/></svg>Football</span></nav>
+  <nav>
+  <span class="sport" id="navFoot" role="button" tabindex="0"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2.6 2.4 1.7-.9 2.8h-3l-.9-2.8L12 4.6zM5.2 9.5l2.8.9.9 2.8-1.7 2.4-2.9-1a8 8 0 0 1 .9-5.1zm3.6 9.9 1-2.9h4.4l1 2.9a8 8 0 0 1-6.4 0zm10-.8-2.9 1-1.7-2.4.9-2.8 2.8-.9 1.8 2.4a8 8 0 0 1-.9 2.7z"/></svg>Football</span>
+  <span class="sport nav-off" id="navDesk" role="button" tabindex="0"><svg class="ic" viewBox="0 0 24 24"><path d="M3 3h2v16h16v2H3V3zm4 10 4-4 3 3 5-6 1.5 1.3L15 15l-3-3-3.6 3.6L7 13z"/></svg>Trading Desk</span>
+</nav>
   <div class="conn"><span class="dot" id="connDot"></span><span id="connTxt">connecting…</span></div>
 </header>
 
@@ -197,6 +226,32 @@
   </main>
 </div>
 
+<div class="wrap" id="deskView" style="display:none;grid-template-columns:1fr">
+  <main class="card">
+    <div class="kpis" id="kpis"></div>
+    <div class="deskgrid">
+      <div style="display:flex;flex-direction:column;gap:var(--pad);min-width:0">
+        <div class="panel">
+          <h3>Equity curve — virtual bankroll (USDC)</h3>
+          <canvas id="equity"></canvas>
+        </div>
+        <div class="panel">
+          <h3>Positions</h3>
+          <div id="posBox"><div class="empty">No positions yet — the agent scans every match on the feed and acts alone when a rule fires.</div></div>
+        </div>
+        <div class="panel">
+          <h3>Backtest — same engine replayed over the real recorded tournament</h3>
+          <div id="btBox"><div class="empty">Backtest report not generated yet.</div></div>
+        </div>
+      </div>
+      <div class="panel" style="min-width:0">
+        <h3>Decision journal — hash-chained, tamper-evident</h3>
+        <div id="djBox" style="max-height:640px;overflow-y:auto"><div class="empty">Waiting for decisions…</div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 let ws, oddsSeries = [], eventsCache = [], selectedId = null, filterLive = false;
@@ -234,6 +289,7 @@ function handle(msg) {
   if (msg.kind === "match_state") { renderState(msg.state); loadGraph(selectedId); }
   if (msg.kind === "incident" && msg.fixtureId === selectedId) { prependIncident(msg.incident); }
   if (msg.kind === "live_odds_all") { refreshList(); if (msg.fixtureId === selectedId && isTab("odds")) loadMarkets(selectedId); }
+  if (msg.kind === "agent_trade" && deskOn) loadDesk();
 }
 
 /* ===== match list ===== */
@@ -524,6 +580,114 @@ document.querySelectorAll(".tab").forEach((t) => {
   t.onclick = activate;
   t.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activate(); } };
 });
+
+/* ===== TRADING DESK view ===== */
+let deskOn = false, deskTimer = null;
+function switchView(desk) {
+  deskOn = desk;
+  document.querySelector(".wrap:not(#deskView)").style.display = desk ? "none" : "";
+  $("deskView").style.display = desk ? "" : "none";
+  $("navFoot").classList.toggle("nav-off", desk);
+  $("navDesk").classList.toggle("nav-off", !desk);
+  if (deskTimer) { clearInterval(deskTimer); deskTimer = null; }
+  if (desk) { loadDesk(); loadBacktest(); deskTimer = setInterval(loadDesk, 5000); }
+}
+$("navFoot").onclick = () => switchView(false);
+$("navDesk").onclick = () => switchView(true);
+
+const fmt = (n, d = 2) => Number(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const pnlCls = (v) => v > 0 ? "pos" : v < 0 ? "neg" : "";
+
+async function loadDesk() {
+  let s; try { s = await (await fetch("/api/agent")).json(); } catch { return; }
+  const k = s.kpis;
+  $("kpis").innerHTML = [
+    ["Bankroll", fmt(k.bankroll) + " USDC", "", "start 1,000"],
+    ["P&L", (k.pnl > 0 ? "+" : "") + fmt(k.pnl), pnlCls(k.pnl), "settled trades"],
+    ["ROI", (k.roiPct > 0 ? "+" : "") + fmt(k.roiPct) + "%", pnlCls(k.roiPct), "on staked"],
+    ["Trades", k.trades + (k.openCount ? " · " + k.openCount + " open" : ""), "", "win rate " + fmt(k.winRatePct, 1) + "%"],
+    ["Avg CLV", k.avgClvPct == null ? "—" : (k.avgClvPct > 0 ? "+" : "") + fmt(k.avgClvPct) + "%", pnlCls(k.avgClvPct || 0), "vs closing price"],
+    ["Status", k.halted ? "HALTED" : "ACTIVE", k.halted ? "neg" : "pos", k.halted ? "stop-loss" : "autonomous"],
+  ].map(([l, v, c, sub]) => '<div class="kpi"><div class="l">' + l + '</div><div class="v ' + c + '">' + v + '</div><div class="s">' + sub + "</div></div>").join("");
+  drawEquity(s.equity || []);
+  renderPositions(s.open || [], (s.closed || []).slice().reverse());
+  renderJournalFeed();
+}
+
+function renderPositions(open, closed) {
+  const row = (p) => {
+    const pnl = p.status === "open" ? null : p.pnl;
+    return '<div class="trow"><div><span class="rulebadge">' + p.rule + "</span><b>" + (p.team || p.side) + "</b> @ " + fmt(p.odds) +
+      ' <span style="color:var(--dimmer)">· ' + p.match + '</span><div class="meta">' + p.trigger +
+      (p.clvPct != null ? ' · CLV <b class="' + pnlCls(p.clvPct) + '">' + (p.clvPct > 0 ? "+" : "") + p.clvPct + "%</b>" : "") + "</div></div>" +
+      '<div class="pnl ' + (pnl == null ? "" : pnlCls(pnl)) + '">' + (pnl == null ? "stake " + fmt(p.stake) : (pnl > 0 ? "+" : "") + fmt(pnl)) + "</div></div>";
+  };
+  const parts = [];
+  if (open.length) parts.push('<div class="secttl">Open (' + open.length + ")</div>" + open.map(row).join(""));
+  if (closed.length) parts.push('<div class="secttl" style="margin-top:10px">Settled</div>' + closed.slice(0, 30).map(row).join(""));
+  $("posBox").innerHTML = parts.join("") || '<div class="empty">No positions yet — the agent scans every match on the feed and acts alone when a rule fires.</div>';
+}
+
+async function renderJournalFeed() {
+  let entries; try { entries = await (await fetch("/api/journal")).json(); } catch { return; }
+  const rel = entries.filter((e) => e.source === "live-agent" || e.kind === "decision" || e.kind === "signal").slice(-60).reverse();
+  if (!rel.length) return;
+  $("djBox").innerHTML = rel.map((e) => {
+    let txt = "";
+    if (e.kind === "decision" && e.position) txt = "<b>" + e.action + "</b> " + (e.position.team || e.position.side) + " @ " + e.position.odds + " · stake " + e.position.stake + (e.action === "SETTLE" ? " · " + (e.position.won ? "WON +" + fmt(e.position.pnl) : "LOST " + fmt(e.position.pnl)) : "");
+    else if (e.kind === "signal") txt = "<b>SIGNAL</b> " + e.rule + (e.note ? " · " + e.note : " · armed");
+    else if (e.kind === "agent") txt = "<b>" + e.action + "</b> " + (e.reason || "");
+    else return "";
+    const rule = e.position?.rule || e.rule || "";
+    return '<div class="trow"><div>' + (rule ? '<span class="rulebadge">' + rule + "</span>" : "") + txt +
+      '<div class="meta">' + new Date(e.ts).toLocaleTimeString() + ' · <span class="hashchip">#' + (e.hash || "").slice(0, 12) + "</span></div></div><div></div></div>";
+  }).join("") || '<div class="empty">Waiting for decisions…</div>';
+}
+
+async function loadBacktest() {
+  let r; try { r = await (await fetch("/api/agent/backtest")).json(); } catch { return; }
+  if (!r.ready) { $("btBox").innerHTML = '<div class="empty">Backtest report not generated yet.</div>'; return; }
+  const k = r.kpis;
+  const rules = Object.entries(k.byRule || {});
+  $("btBox").innerHTML =
+    '<div style="color:var(--dim);font-size:12.5px;margin-bottom:8px">' + r.graded + " real matches graded · " + (r.withHistory || "—") + " odds histories · run " + new Date(r.ranAt).toLocaleString() + "</div>" +
+    '<div class="kpis" style="padding:0 0 10px">' +
+      '<div class="kpi"><div class="l">Final bankroll</div><div class="v ' + pnlCls(k.bankroll - 1000) + '">' + fmt(k.bankroll) + '</div><div class="s">from 1,000</div></div>' +
+      '<div class="kpi"><div class="l">ROI</div><div class="v ' + pnlCls(k.roiPct) + '">' + (k.roiPct > 0 ? "+" : "") + fmt(k.roiPct) + '%</div><div class="s">' + k.trades + " trades</div></div>" +
+      '<div class="kpi"><div class="l">Win rate</div><div class="v">' + fmt(k.winRatePct, 1) + '%</div><div class="s">Avg CLV ' + (k.avgClvPct == null ? "—" : (k.avgClvPct > 0 ? "+" : "") + fmt(k.avgClvPct) + "%") + "</div></div>" +
+    "</div>" +
+    (rules.length ? '<table class="bt"><tr><th>Rule</th><th>Trades</th><th>Wins</th><th>P&L</th></tr>' +
+      rules.map(([n, v]) => "<tr><td>" + n + "</td><td>" + v.trades + "</td><td>" + v.wins + '</td><td class="' + pnlCls(v.pnl) + '">' + (v.pnl > 0 ? "+" : "") + fmt(v.pnl) + "</td></tr>").join("") + "</table>" : "");
+}
+
+const eqCanvas = $("equity");
+function drawEquity(points) {
+  const c = eqCanvas.getContext("2d");
+  const w = eqCanvas.width = eqCanvas.clientWidth, h = eqCanvas.height = 150;
+  c.clearRect(0, 0, w, h);
+  if (points.length < 2) {
+    c.fillStyle = "#64748B"; c.font = "11px Barlow, sans-serif";
+    c.fillText("equity curve draws as trades settle…", 10, 20);
+    return;
+  }
+  const vals = points.map((p) => p.value);
+  const min = Math.min(...vals) * 0.995, max = Math.max(...vals) * 1.005;
+  const x = (i) => (i / (points.length - 1)) * (w - 56) + 46;
+  const y = (v) => h - 18 - ((v - min) / (max - min || 1)) * (h - 36);
+  c.strokeStyle = "#1F2733"; c.beginPath();
+  for (let g = 0; g <= 3; g++) { const gy = 10 + g * (h - 28) / 3; c.moveTo(46, gy); c.lineTo(w - 10, gy); }
+  c.stroke();
+  const base = y(points[0].value);
+  c.strokeStyle = "#64748B"; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(46, base); c.lineTo(w - 10, base); c.stroke(); c.setLineDash([]);
+  const last = vals[vals.length - 1], up = last >= vals[0];
+  c.strokeStyle = up ? "#22C55E" : "#EF4444"; c.lineWidth = 2; c.beginPath();
+  points.forEach((p, i) => i ? c.lineTo(x(i), y(p.value)) : c.moveTo(x(i), y(p.value)));
+  c.stroke();
+  c.fillStyle = "#64748B"; c.font = "10px monospace";
+  c.fillText(fmt(max, 0), 6, 16); c.fillText(fmt(min, 0), 6, h - 12);
+  c.fillStyle = up ? "#22C55E" : "#EF4444"; c.font = "bold 11px Barlow, sans-serif";
+  c.fillText(fmt(last), w - 52, y(last) - 6);
+}
 
 /* LIVE BY DEFAULT */
 (async function boot() {
