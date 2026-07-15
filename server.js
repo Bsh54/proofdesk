@@ -11,6 +11,8 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { TxLive } from "./txline-live.mjs";
 import { createAgent, DEFAULT_CONFIG as AGENT_DEFAULTS } from "./agent.mjs";
+import { createBot } from "./bot.mjs";
+import { createHorus } from "./horus.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8088;
@@ -155,7 +157,13 @@ const agentConfig = existsSync(AGENT_CONFIG_FILE)
 
 const liveAgent = createAgent(agentConfig, {
   journal: (r) => journalAppend({ ...r, source: "live-agent" }),
-  emit: (m) => broadcast(m),
+  emit: (m) => {
+    broadcast(m);
+    // sharp-money alerts double as fan notifications through HORUS
+    if (horus && m.action === "OPEN" && m.position?.rule === "STEAM") {
+      horus.notifyFollowers(m.position.fixtureId, { kind: "steam", side: m.position.side, detail: m.position.trigger });
+    }
+  },
 });
 
 // restore the persisted book (bankroll, settled trades, equity curve)
@@ -176,6 +184,127 @@ setInterval(() => {
     }));
   } catch {}
 }, 30_000);
+
+// ---------------------------------------------------------------------------
+// 2-ter. HORUS — the Telegram pundit. The eye on every match: follows the
+// full feed, notifies fans of goals / cards / sharp market moves with the
+// market's read, speaks voice notes, replays archived matches, answers
+// questions. Dormant until data/telegram.json provides a bot token.
+// ---------------------------------------------------------------------------
+
+let horus = null;
+const chatLists = new Map(); // chatId -> last numbered match list
+
+function matchLabel(id) {
+  const meta = live ? live.metaFor(id) : null;
+  return meta ? `${meta.home} vs ${meta.away}` : `match ${id}`;
+}
+
+function liveContextFor(id) {
+  const meta = live ? live.metaFor(id) : null;
+  const st = scoreStates.get(id);
+  const probs = liveAgent.state.fixtures.get(id)?.lastProbs;
+  const odds = liveAgent.state.fixtures.get(id)?.lastOdds;
+  const parts = [matchLabel(id)];
+  if (st) parts.push(`score ${st.score[0]}-${st.score[1]}, minute ${st.minute ?? "?"}, phase ${st.gameState || PHASES[st.statusId] || "scheduled"}, yellows ${st.yellow.join("-")}, reds ${st.red.join("-")}, corners ${st.corners.join("-")}`);
+  if (probs && meta) parts.push(`win probabilities: ${meta.home} ${(probs.home * 100).toFixed(1)}%, draw ${(probs.draw * 100).toFixed(1)}%, ${meta.away} ${(probs.away * 100).toFixed(1)}%`);
+  if (odds) parts.push(`odds 1X2: ${odds.home} / ${odds.draw} / ${odds.away}`);
+  return parts.join("\n");
+}
+
+async function botCommand({ chatId, text, from, bot }) {
+  const name = from.first_name || from.username || "fan";
+  const [cmd, ...rest] = text.split(/\s+/);
+  const arg = rest.join(" ");
+  const listMatches = () => {
+    const ids = live ? live.allFixtureIds() : [];
+    const rows = ids.map((id) => ({ id, meta: live.metaFor(id) })).filter((r) => r.meta)
+      .sort((a, b) => (a.meta.startTime || 0) - (b.meta.startTime || 0));
+    chatLists.set(String(chatId), rows.map((r) => r.id));
+    return rows;
+  };
+  switch ((cmd || "").toLowerCase()) {
+    case "/start":
+      await bot.sendText(chatId,
+        `𓂀 <b>I am HORUS — the eye on every match.</b>\n\nI watch all World Cup matches and their betting markets at once, and I tell you the moment something matters: goals, red cards, and when the sharp money moves.\n\n<b>Commands</b>\n/matches — list matches\n/follow N — follow match N\n/followall — follow everything\n/live — current picture of followed matches\n/ask &lt;question&gt; — talk to me about a live match\n/relive N — replay a past match as if live 🕰\n/voice off|on — voice notes\n/unfollow — silence me`);
+      break;
+    case "/matches": {
+      const rows = listMatches();
+      if (!rows.length) { await bot.sendText(chatId, "No matches on the feed right now."); break; }
+      await bot.sendText(chatId, "<b>Matches</b>\n" + rows.map((r, i) => {
+        const st = scoreStates.get(r.id);
+        const liveMark = st && st.statusId && st.statusId !== 10 && PHASES[st.statusId] ? " 🔴" : "";
+        const when = r.meta.startTime ? new Date(r.meta.startTime).toISOString().slice(5, 16).replace("T", " ") : "";
+        return `${i + 1}. ${r.meta.home} vs ${r.meta.away} — ${when} UTC${liveMark}`;
+      }).join("\n") + "\n\n/follow N · /relive N");
+      break;
+    }
+    case "/follow": {
+      const rows = chatLists.get(String(chatId)) || listMatches().map((r) => r.id);
+      const id = rows[parseInt(arg, 10) - 1];
+      if (!id) { await bot.sendText(chatId, "Use /matches then /follow N."); break; }
+      bot.subscribe(chatId, id, name);
+      await bot.sendText(chatId, `𓂀 Following <b>${matchLabel(id)}</b>. I will speak when it matters.`);
+      break;
+    }
+    case "/followall":
+      bot.subscribe(chatId, "all", name);
+      await bot.sendText(chatId, "𓂀 I will tell you about <b>every match</b> on the feed.");
+      break;
+    case "/unfollow":
+      bot.unsubscribe(chatId);
+      await bot.sendText(chatId, "Silenced. /follow when you miss me.");
+      break;
+    case "/voice":
+      bot.setVoice(chatId, arg !== "off");
+      await bot.sendText(chatId, arg === "off" ? "Voice notes off." : "Voice notes on.");
+      break;
+    case "/live": {
+      const subs = bot.subs.get(String(chatId));
+      const ids = subs ? (subs.follows[0] === "all" ? (live ? live.allFixtureIds() : []) : subs.follows) : [];
+      const active = ids.filter((id) => scoreStates.get(Number(id))?.statusId && scoreStates.get(Number(id)).statusId !== 10);
+      const shown = (active.length ? active : ids).slice(0, 5);
+      if (!shown.length) { await bot.sendText(chatId, "You follow nothing yet — /matches."); break; }
+      for (const id of shown) await bot.sendText(chatId, liveContextFor(Number(id)));
+      break;
+    }
+    case "/ask": {
+      if (!arg) { await bot.sendText(chatId, "Ask me something: /ask who is winning?"); break; }
+      const subs = bot.subs.get(String(chatId));
+      const ids = subs ? (subs.follows[0] === "all" ? (live ? live.allFixtureIds() : []) : subs.follows) : (live ? live.allFixtureIds() : []);
+      const ctx = ids.slice(0, 6).map((id) => liveContextFor(Number(id))).join("\n---\n");
+      await horus.ask(chatId, arg, ctx || "no live data right now");
+      break;
+    }
+    case "/relive": {
+      const rows = chatLists.get(String(chatId)) || listMatches().map((r) => r.id);
+      const id = rows[parseInt(arg, 10) - 1];
+      if (!id) { await bot.sendText(chatId, "Use /matches then /relive N."); break; }
+      horus.relive(chatId, id, live.metaFor(id) || { home: "Home", away: "Away" });
+      break;
+    }
+    case "/stopreplay":
+      horus.stopReplay(chatId);
+      await bot.sendText(chatId, "Replay stopped.");
+      break;
+    default:
+      if (text.startsWith("/")) await bot.sendText(chatId, "Unknown command — /start for the list.");
+      else { // free text = conversation
+        const ids = live ? live.allFixtureIds() : [];
+        const ctx = ids.slice(0, 6).map((id) => liveContextFor(Number(id))).join("\n---\n");
+        await horus.ask(chatId, text, ctx || "no live data right now");
+      }
+  }
+}
+
+const punditBot = createBot({ onCommand: botCommand });
+horus = createHorus({
+  bot: punditBot,
+  journal: (r) => journalAppend({ ...r, source: "horus" }),
+  getMeta: (id) => (live ? live.metaFor(id) : null),
+  getProbs: (id) => liveAgent.state.fixtures.get(id)?.lastProbs || null,
+  getState: (id) => scoreStates.get(id) || null,
+});
 
 // ---------------------------------------------------------------------------
 // 3. RULE-BASED AGENT ("le trader") — paper-trading book.
@@ -413,6 +542,13 @@ function ensureLive() {
       if (side0 || side1) liveAgent.onIncident(m.FixtureId, { kind: "goal", isHome: side0, ts: tsNow, score: [...st.score] });
       if (st.red[0] > prev.red[0]) liveAgent.onIncident(m.FixtureId, { kind: "red", isHome: true, ts: tsNow, score: [...st.score] });
       if (st.red[1] > prev.red[1]) liveAgent.onIncident(m.FixtureId, { kind: "red", isHome: false, ts: tsNow, score: [...st.score] });
+      // HORUS speaks to the fans (async, never blocks the feed)
+      if (horus) {
+        if (side0 || side1) horus.notifyFollowers(m.FixtureId, { kind: "goal", isHome: side0 }).catch(() => {});
+        if (st.red[0] > prev.red[0]) horus.notifyFollowers(m.FixtureId, { kind: "red", isHome: true }).catch(() => {});
+        if (st.red[1] > prev.red[1]) horus.notifyFollowers(m.FixtureId, { kind: "red", isHome: false }).catch(() => {});
+        if (st.statusId !== prev.statusId && PHASES[st.statusId]) horus.notifyFollowers(m.FixtureId, { kind: "period", text: PHASES[st.statusId] }).catch(() => {});
+      }
       if (st.statusId === 10 && prev.statusId !== 10) {
         const [h, a] = st.score;
         liveAgent.onFinal(m.FixtureId, { winner: h > a ? "home" : a > h ? "away" : "draw", finalScore: `${h}-${a}`, ts: tsNow });
@@ -430,6 +566,7 @@ function ensureLive() {
         odds: { home: o.home, draw: o.draw, away: o.away },
         pct: o.pct, inRunning: o.inRunning, meta: live ? live.metaFor(o.fixtureId) : null,
       });
+      if (horus) horus.rememberProbs(o.fixtureId);
       if (!liveSession || o.fixtureId !== liveSession.fixtureId) return;
       const ev = { type: "odds", minute: liveMinute(o.ts), home: o.home, draw: o.draw, away: o.away, messageId: o.messageId, ts: o.ts };
       broadcast({ kind: "event", ev });
